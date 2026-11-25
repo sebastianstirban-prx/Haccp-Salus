@@ -307,7 +307,7 @@ select.in{padding-right:8px}
   body.printing .plabel{box-shadow:none;margin:0 auto}
 }
 
-/* v3 */
+/* file allegati, selettori compatti, profilo */
 .sec-h.wrap{flex-wrap:wrap;row-gap:8px}
 .psel{flex:none}
 .in.sm{height:36px;padding:0 10px;font-size:14px;width:auto;max-width:100%}
@@ -336,7 +336,7 @@ input.file{height:auto;padding:10px;font-size:14px}
 .login-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .login-row .btn{min-width:120px}
 
-/* v4 */
+/* password visibile, consenso, badge home, avvisi letti, ricette e note etichetta */
 .pwrap{position:relative;display:flex}
 .pwrap .in{flex:1;min-width:0;padding-right:50px}
 .pwrap .eye{position:absolute;right:2px;top:50%;transform:translateY(-50%);color:var(--muted)}
@@ -355,7 +355,7 @@ input.file{height:auto;padding:10px;font-size:14px}
 .plabel .note{border:1px solid var(--ink);border-radius:4px;padding:6px 8px;white-space:pre-wrap;font-size:12px;margin:0}
 @media (min-width:700px) and (max-width:979px){.app{max-width:760px}.sheet{max-width:700px}}
 @media (orientation:landscape) and (max-height:500px){.sheet{max-height:96dvh}.login{padding-block:24px}}
-/* v5 */
+/* riepilogo ricerche, materia prima nei DDT, stato IA */
 .qsum{font-size:14px;line-height:1.45;background:var(--brand-soft);color:var(--brand-deep);border-radius:10px;padding:10px 12px;margin:0 16px 8px}
 .qsum b{font-weight:700}
 .mp-line{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
@@ -395,10 +395,85 @@ input.file{height:auto;padding:10px;font-size:14px}
 <div id="print"></div>
 
 <script>
+/*
+  ============================================================================
+  HACCP Salus · LabService srls · web-app in un solo file (HTML + CSS + JS, senza build)
+  Realizzata da Proxima Studio.
+  ============================================================================
+
+  COME FUNZIONA, IN BREVE
+  - Tutta l'app vive in questa funzione (IIFE). Nessun framework: le schermate sono
+    stringhe HTML generate dalle funzioni v*() e inserite in #app.
+  - Navigazione con l'hash dell'indirizzo (#home, #temperatura, #lotti, ...):
+    route() legge l'hash, render(v) disegna la schermata presa dalla mappa V.
+  - Tutti i dati di un'azienda stanno in un unico oggetto S (vedi "MODELLO DATI").
+    Dopo ogni modifica si chiama save().
+  - I tasti usano data-act="nome" (gestiti dalla mappa ACT), i moduli data-form="nome"
+    (mappa FORMS), i collegamenti interni data-go="schermata".
+    Per aggiungere un tasto: data-act="mio-tasto" nell'HTML e ACT['mio-tasto']=a=>{...}.
+
+  TRE MODALITÀ
+  1. ONLINE (CLOUD = true): pagina aperta da un sito (Netlify). Login con Supabase,
+     dati salvati per azienda, foto e documenti nel deposito file. Vedi la sezione
+     "online: Supabase". Configurazione in SUPA: indirizzo e chiave pubblica. La chiave
+     pubblica può stare qui, perché i permessi li decidono le regole del database.
+  2. DEMO LOCALE: aggiungere ?demo all'indirizzo. Dati di esempio salvati solo nel
+     browser (localStorage), account demo in ACCOUNTS. Utile senza connessione.
+  3. ANTEPRIMA claude.ai (FRAMED = true): come la demo; la lettura delle foto usa
+     Claude dell'anteprima (window.claude.use('sample')).
+
+  SERVER (cartella supabase/ del repository)
+  - Tabelle: aziende, profili (utenti), app_state (l'oggetto S di ogni azienda, con
+    numero di versione), app_state_storico (ultime 30 versioni). Regole RLS: ogni
+    utente vede solo la propria azienda.
+  - Funzione admin-utenti: Area LabService (crea aziende e utenti, password, sospensioni).
+  - Funzione leggi-fattura: lettura con IA di fatture ed etichette (segreto ANTHROPIC_API_KEY).
+
+  MAPPA DEL FILE (cerca i titoli "---------- nome ----------")
+  - costanti e configurazione ......... date, elenchi fissi (allergeni, tipi di attrezzatura...)
+  - icons ............................. icone SVG: ic('nome', dimensione)
+  - seed data ......................... dati dimostrativi (seed), caricamento e salvataggio
+  - domain helpers .................... calcoli HACCP (scadenze, temperature, codici lotto)
+  - UI pieces ......................... pezzi di interfaccia riusabili (fld, inp, tag, kv)
+  - views ............................. una funzione per schermata (vHome, vTemp, vLotti...)
+  - overlays .......................... fogli a scomparsa (openSheet), menu, messaggi (toast)
+  - sheets (forms) .................... moduli che si aprono nei fogli
+  - files: PDF, CSV, print ............ registri e documenti in PDF (jsPDF) e CSV
+  - photos ............................ riduzione e preparazione delle foto
+  - lettura fattura da foto ........... IA (server o anteprima), poi lettore di testo sul telefono (Tesseract)
+  - registri .......................... contenuto dei registri temperature, sanificazioni, schede extra
+  - documenti caricati ................ file allegati (IndexedDB sul telefono + deposito online)
+  - lettura targhetta attrezzatura .... dati di frigoriferi e macchine dalla foto (per ora solo nell'anteprima)
+  - actions / forms ................... ACT e FORMS: cosa succede a ogni tasto e a ogni invio
+  - aggiornamenti successivi .......... blocchi aggiunti con le liste di modifiche del cliente
+  - online: Supabase .................. login, sincronizzazione, foto online, password, Area LabService
+  - lettura etichette e codici a barre  etichette con IA, EAN e GS1-128 (ZXing), Open Food Facts
+  - events ............................ ascoltatori globali e avvio dell'app
+
+  MODELLO DATI (oggetto S, versione v:3)
+  azienda{nome,settore,addr,piva,pec,tel,email,rap,prep}   dati dell'azienda cliente
+  locali[], attrezzature[]          reparti e macchine (temp:true = verifica temperatura, min/max in °C)
+  temps[]                           verifiche temperatura {date, slot:'Mattina'|'Sera', c:{idCella:'ok'|'nc'}, v, by}
+  sanAreas[], sanLog[], straord[]   aree da pulire, pulizie giornaliere, sanificazioni straordinarie
+  fornitori[], products[]           fornitori e magazzino (lotto, scadenza, confezioni, allergeni, ean)
+  fatture[]                         controllo merci in ingresso (status 'pending'|'ok'|'nc')
+  nonconf[]                         merce non conforme e azioni correttive
+  lotti[]                           lotti di produzione (items = materie prime con il lotto del fornitore)
+  clienti[], uscite[]               clienti e DDT in uscita (righe = lotti venduti)
+  ricette[], menus[], team[]        ricette con allergeni, menu, personale con attestati
+  extra{abb,scong,liev,ghiaccio}    schede extra: abbattimento, scongelamento, lievitazione, ghiaccio
+  reports[], docs[], audits[]       ispezioni, documentazione HACCP, punteggi audit
+  pest{ditta,checks[]}, manut{int[]} infestanti e manutenzioni
+  retention                         anni di conservazione di lotti e DDT (cancellazione automatica)
+  Le foto sono stringhe "data:image/...". Online vengono salvate nel deposito file e nei
+  dati resta solo il riferimento "sbfile:<azienda>/img/<codice>".
+  ============================================================================
+*/
 (()=>{
 'use strict';
-const KEY='haccp-salus-demo-v3';
-const FRAMED=(()=>{try{return window.self!==window.top}catch(e){return true}})();
+/* ---------- costanti e configurazione ---------- */
+const KEY='haccp-salus-demo-v3';   // dati della demo locale nel browser: non cambiarla, si perderebbero i dati salvati
+const FRAMED=(()=>{try{return window.self!==window.top}catch(e){return true}})();   // true = aperta dentro l'anteprima di claude.ai
 /* online (Supabase): fuori dall'anteprima i dati stanno sul server, per azienda. ?demo nell'indirizzo = demo locale */
 const SUPA={url:'https://wbcpdfpuxgvobrqmfupd.supabase.co',key:'sb_publishable_19IyTBG3Vy6WoGgxLdgj7A_QMihwSAE',dom:'utenti.haccp-salus.app',
   js:['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js','https://unpkg.com/@supabase/supabase-js@2.118.0/dist/umd/supabase.js']};
@@ -442,6 +517,8 @@ const COLD=['Cella frigo','Frigorifero','Banco frigo','Congelatore'];
 const MOTIVI_MAG=['Prodotto scaduto','Confezione danneggiata','Alterazione visibile (muffa, odore, colore)','Temperatura di conservazione non rispettata','Infestazione','Etichetta mancante o illeggibile','Altro'];
 const ALLEG_DEF={temp:'1',san:'2',abb:'3',scong:'4',liev:'5',ghiaccio:'6'};
 const ALLEG_LBL={temp:'Registro temperature',san:'Registro sanificazioni',abb:'Registro abbattimento',scong:'Registro scongelamento',liev:'Registro lievitazione',ghiaccio:'Registro macchina del ghiaccio'};
+// Account della demo locale (password verificate con hash SHA-256).
+// Online questo elenco viene riempito con i colleghi della stessa azienda presi dal server.
 const ACCOUNTS=[{"u": "luigi.rossi", "h": "42678f5a9b4c92966a1b235504b207b597a475ecf407a1bc9e98fd035f81ed21", "name": "Luigi Rossi", "role": "Responsabile HACCP"}, {"u": "anna.esposito", "h": "85ffb062ee38170876608ee8eb8cf080181cde364d1f7e346ec2a335fe538eed", "name": "Anna Esposito", "role": "Preposto"}, {"u": "marco.deluca", "h": "d0d928dd3afa153abc2c1c3dfc941433bda5fe1261a65715097027a52e1eabf7", "name": "Marco De Luca", "role": "Operatore"}, {"u": "giulia.ferrara", "h": "01ad92fd008f5df57d9cdd27dc36eb499fff25cc5faa478e21a55d24fc34fecd", "name": "Giulia Ferrara", "role": "Operatore"}];
 const SKEY='haccp-salus-session';
 let SESSION=(()=>{try{return localStorage.getItem(SKEY)||''}catch(e){return ''}})();
@@ -657,6 +734,7 @@ function codeFor(name,iso,list){
   const n=list.filter(l=>l.code&&l.code.startsWith(base)).length+1;
   return base+pad(n);
 }
+/* caricamento e salvataggio: online la copia locale è solo una cache, la fonte è il server (vedi cloudSaved) */
 function load(){
   try{const s=JSON.parse(localStorage.getItem(CLOUD?CKEY:KEY)||'null');if(s&&s.v===3)return s}catch(e){}
   return seed();
@@ -1265,6 +1343,7 @@ function rerender(){
   window.scrollTo(0,y);
 }
 function setHash(h){try{history.replaceState(null,'','#'+h)}catch(e){location.hash=h}}
+/* router: decide la schermata dall'hash; online gestisce anche blocco azienda, cambio password e Area LabService */
 function route(){
   let h=decodeURIComponent(location.hash.slice(1));
   closeSheet(true);closeDrawer();
@@ -1853,6 +1932,7 @@ async function ocrRead(blob,onProg){
   const w=await window.Tesseract.createWorker('ita',1,{workerPath:TJS+'worker.min.js',corePath:TCORE,langPath:TLANG,logger:onProg});
   try{const r=await w.recognize(blob);return (r&&r.data&&r.data.text)||''}finally{try{await w.terminate()}catch(e){}}
 }
+/* fattura: prova l'IA (server o anteprima), se non risponde usa il lettore di testo sul telefono */
 async function readInvoice(file){
   const id=ui.readId=(ui.readId||0)+1;
   const step=(msg,pct)=>{if(id!==ui.readId)return;const p=$('#rd-p');if(p)p.textContent=msg;const b=$('#rd-b');if(b&&pct!=null)b.style.width=Math.round(pct)+'%'};
@@ -2266,6 +2346,9 @@ const FORMS={
     S.manut.int.push({id:uid(),attr:val(f,'attr'),date:val(f,'date'),tipo,desc:val(f,'desc'),by:val(f,'by')||me().name});save();closeSheet(true);rerender();toast('Intervento registrato')}
 };
 
+/* ---------- aggiornamenti successivi (liste di modifiche del cliente) ----------
+   Da qui in poi i blocchi aggiungono o sostituiscono voci di ACT e FORMS definite sopra:
+   l'ultima definizione di una voce è quella che vale. */
 Object.assign(ACT,{
   'temp-month':a=>regSheet('temp',a.dataset.k||curYM),
   'san-month':()=>regSheet('san',curYM),
@@ -2419,6 +2502,7 @@ document.addEventListener('change',e=>{
   if(t.dataset.ch==='uf-c'){const w=$('#uf-new');if(w)w.hidden=t.value!=='__new'}
 });
 P.eye='<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+/* lista modifiche 1: password visibile, avvisi letti, ricette e note sulle etichette, DDT */
 P.eyeoff='<path d="M3 3l18 18"/><path d="M10.6 5.1A9.8 9.8 0 0 1 12 5c6.5 0 10 7 10 7a17.7 17.7 0 0 1-3.2 4.2M6.1 6.1A17.6 17.6 0 0 0 2 12s3.5 7 10 7a9.9 9.9 0 0 0 5-1.3"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>';
 Object.assign(ACT,{
   bell:()=>{const all=notifs();const un=unread();openSheet('Avvisi',`${un.length?`<button class="btn sec" data-act="n-read-all">${ic('check',18)} Segna tutti come letti (${un.length})</button>`:'<p class="muted">Hai letto tutti gli avvisi.</p>'}${notifBox(all)}`)},
@@ -2535,6 +2619,7 @@ document.addEventListener('change',e=>{
   if(t.dataset.ch==='lab-note-on'){const l=S.lotti.find(x=>x.id===t.dataset.id);if(!l)return;l.noteOn=t.checked;save();const w=$('#lab-note-w');if(w)w.hidden=!t.checked;const p=$('#pl-note');if(p)p.hidden=!(t.checked&&(l.labelNote||'').trim());if(t.checked){const ta=$('#lab-note');if(ta)ta.focus()}}
   if(t.dataset.ch==='pay-type'){const s=t.value==='sepa';$('#pay-sepa').hidden=!s;$('#pay-card').hidden=s}
 });
+/* migrazione: completa i dati salvati con versioni precedenti dell'app (si esegue all'avvio) */
 function migrateS(){
   const find=re=>(S.locali.find(l=>re.test(l.name))||S.locali[0]||{}).id||'';
   const lab=find(/labor/i),mag=find(/magazz|cell/i);
@@ -2544,9 +2629,12 @@ function migrateS(){
 }
 migrateS();save();
 {const _r=ACT['do-reset'];ACT['do-reset']=()=>{_r();migrateS();save();rerender()}}
+/* a mezzanotte l'app si ricarica, così 'oggi' e i registri del giorno sono sempre giusti */
 const dayCheck=()=>{if(isoOf(new Date())!==TISO&&$('#sheet').hidden)location.reload()};
 setInterval(dayCheck,60000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&isoOf(new Date())!==TISO)location.reload()});
+/* lista modifiche 2.1: conservazione, IA nel Profilo, ricerca su tutti i mesi */
+/* cancellazione automatica: lotti e DDT più vecchi di S.retention anni (un lotto resta se un DDT conservato lo usa) */
 function purgeOld(dry){
   const y=S.retention||1;const c=new Date(TODAY);c.setFullYear(c.getFullYear()-y);const cut=isoOf(c);
   const keepU=S.uscite.filter(u=>u.date>=cut);
@@ -2622,6 +2710,7 @@ document.addEventListener('change',e=>{const t=e.target;if(t.dataset.ch!=='ret')
   const keep=S.retention;S.retention=v;const r=purgeOld(true);S.retention=keep;
   if(!r.n){S.retention=v;save();rerender();toast('Periodo di conservazione aggiornato');return}
   t.value=String(old);openSheet('Ridurre la conservazione?',`<p>Con ${v} ann${v===1?'o':'i'} vengono eliminati subito <b>${r.n} tra lotti e DDT</b> precedenti al ${fmt(r.cut)}. Non si possono recuperare.</p><div class="grid2"><button class="btn sec" data-act="close-sheet">Annulla</button><button class="btn danger" data-act="ret-ok" data-v="${v}">Elimina e salva</button></div>`)});
+/* migrazione della lista 2.1, eseguita all'avvio */
 (function migrate5(){
   if(S.azienda&&/^labservice$/i.test(S.azienda.nome))S.azienda.nome='LabService srls';
   S.clienti.forEach(c=>{if(!c.tipo)c.tipo=guessTipo(c.name)});
@@ -2714,6 +2803,7 @@ function merge3(b,l,r){
   return l;
 }
 async function fetchState(){const {data,error}=await C.sb.from('app_state').select('data,version').maybeSingle();if(error)throw error;return data}
+/* chiamata da save(): scrive la copia locale e programma l'invio al server dopo ~1 secondo */
 function cloudSaved(){
   if(!C.ready)return;
   let t;try{t=J(extOf(S))}catch(e){return}
@@ -2721,6 +2811,8 @@ function cloudSaved(){
   lsSet(CKEY,t);metaSet({...metaGet(),dirty:true});
   C.dirty=true;clearTimeout(C.timer);C.timer=setTimeout(cloudPush,900);
 }
+/* invio al server: carica le foto nuove, poi salva i dati con controllo di versione.
+   Se un altro dispositivo ha salvato prima (risposta -1), scarica, unisce (merge3) e riprova. */
 async function cloudPush(){
   if(!C.ready)return;
   if(C.saving){C.again=true;return}
@@ -2751,11 +2843,13 @@ async function cloudPush(){
     if(C.dirty&&!C.err){clearTimeout(C.timer);C.timer=setTimeout(cloudPush,400)}
   }
 }
+/* attende che tutte le modifiche siano arrivate online (usata prima di uscire) */
 async function cloudFlush(ms=12000){
   const end=Date.now()+ms;
   while((C.dirty||C.saving||C.pend.size)&&Date.now()<end){if(!C.saving)cloudPush();await sleep(300)}
   return !(C.dirty||C.saving||C.pend.size);
 }
+/* ogni 30 secondi e quando si torna sull'app: se sul server c'è una versione nuova, la scarica */
 async function cloudPull(){
   if(!C.ready||C.saving||C.dirty||document.hidden)return;
   try{
@@ -2768,6 +2862,7 @@ async function cloudPull(){
     if(!busy&&ui.view!=='login')rerender();else C.needRender=true;
   }catch(e){}
 }
+/* dati iniziali di un'azienda nuova: struttura vuota con l'anagrafica presa dal server */
 function blankState(az){
   const s=seed();
   const clr=v=>Array.isArray(v)?[]:(v&&typeof v==='object')?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clr(x)])):typeof v==='string'?'':v;
@@ -2779,6 +2874,7 @@ function bootMsg(html){document.body.classList.add('is-login');$('#drawer').inne
 const bootWait=t=>`<div class="loading"><span class="spin" aria-hidden="true"></span><p role="status">${t}</p></div>`;
 const bootErr=t=>`<div class="card stack"><p>${t}</p><button class="btn" data-act="reload">Riprova</button></div>`;
 function blockHTML(){return `<main class="login pad stack"><div class="logo" role="img" aria-label="labService"><b>lab</b>Service</div><div class="card stack"><strong>Accesso sospeso</strong><p>L'accesso di <b>${esc(C.ctx&&C.ctx.azienda?C.ctx.azienda.nome:'questa azienda')}</b> a HACCP Salus è sospeso. Per riattivarlo contatta LabService.</p><button class="btn sec" data-act="logout">Esci</button></div></main>`}
+/* avvio online: carica la libreria Supabase, controlla se c'è una sessione, poi cloudEnter() */
 async function cloudBoot(){
   bootMsg(bootWait('Caricamento…'));
   try{await sbInit()}catch(e){bootMsg(bootErr('Non riesco a collegarmi al servizio. Controlla la connessione e riprova.'));return}
@@ -2786,6 +2882,8 @@ async function cloudBoot(){
   if(!sess){SESSION='';route();return}
   await cloudEnter();
 }
+/* dopo il login: profilo, azienda e colleghi (mio_contesto), poi i dati. Se la copia locale non è
+   aggiornata la sostituisce e ricarica la pagina, così tutte le migrazioni girano come all'avvio. */
 async function cloudEnter(){
   let ctx;
   try{const r=await C.sb.rpc('mio_contesto');if(r.error)throw r.error;ctx=r.data}
@@ -2823,6 +2921,7 @@ async function cloudEnter(){
   fetchRefs(refsIn(S)).then(n=>{swapIn(S);if(n&&$('#sheet').hidden&&ui.view!=='login')rerender()});
   setTimeout(()=>{try{if(J(extOf(S))!==C.base||C.pend.size)cloudSaved()}catch(e){}},80);
 }
+/* login online: il nome utente diventa l'indirizzo interno <nome.utente>@utenti.haccp-salus.app */
 async function cloudLogin(f){
   const u=val(f,'u').toLowerCase(),p=f.elements.p.value;
   if(!u||!p)return ferr(f,'Inserisci utente e password.',[!u?'u':'p']);
@@ -2854,6 +2953,7 @@ function vPassword(){
   </div></div>`;
 }
 /* Area LabService */
+/* chiamata alla funzione server admin-utenti (solo per utenti LabService) */
 async function admCall(azione,body={}){
   const {data}=await C.sb.auth.getSession();const s=data&&data.session;
   let r;try{r=await fetch(SUPA.url+'/functions/v1/admin-utenti',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+(s?s.access_token:''),apikey:SUPA.key},body:J({azione,...body})})}
@@ -2868,6 +2968,7 @@ async function admLoad(){
 }
 const admAz=id=>ui.adm&&ui.adm.aziende.find(a=>a.id===id);
 const admU=u=>ui.adm&&ui.adm.utenti.find(x=>x.username===u);
+/* schermata Area LabService: aziende clienti, utenti, password, sospensioni */
 function vAdmin(){
   if(!ui.adm&&!ui.admErr){admLoad();return `<div class="pad">${bootWait('Carico aziende e utenti…')}</div>`}
   if(!ui.adm)return `<div class="pad stack">${bootErr(esc(ui.admErr))}</div>`.replace('data-act="reload"','data-act="adm-reload"');
@@ -3055,6 +3156,7 @@ function parseCode(raw){
   }
   return ok?o:{raw:o.raw};
 }
+/* decodifica sul telefono: BarcodeDetector del browser se c'è (Android), altrimenti ZXing in più angolazioni */
 async function readBarcode(file){
   try{if('BarcodeDetector' in window){const bd=new window.BarcodeDetector();const bmp=await createImageBitmap(file);const r=await bd.detect(bmp);if(r&&r.length)return r[0].rawValue}}catch(e){}
   try{if(!window.ZXing)await loadScript(ZXJS)}catch(e){return ''}
@@ -3077,6 +3179,7 @@ async function readBarcode(file){
   return '';
 }
 const OFFAL={'en:gluten':'Glutine','en:milk':'Lattosio','en:eggs':'Uova','en:nuts':'Frutta a guscio','en:peanuts':'Arachidi','en:soybeans':'Soia','en:fish':'Pesce','en:crustaceans':'Crostacei','en:molluscs':'Molluschi','en:celery':'Sedano','en:mustard':'Senape','en:sesame-seeds':'Sesamo','en:sulphur-dioxide-and-sulphites':'Solfiti','en:lupin':'Lupini'};
+/* catalogo pubblico Open Food Facts: nome, marca, allergeni e peso dato l'EAN */
 async function offLookup(ean){
   try{
     const ctl=new AbortController();const tm=setTimeout(()=>ctl.abort(),6000);
@@ -3086,6 +3189,7 @@ async function offLookup(ean){
   }catch(e){return null}
 }
 const normL=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+/* cerca in magazzino: prima per lotto, poi per EAN, poi per nome; a parità sceglie la scadenza più vicina */
 function stockMatch(d){
   const P=S.products;if(!P.length)return null;
   const fifo=a=>[...a].sort((x,y)=>String(x.scad||'9999').localeCompare(String(y.scad||'9999')))[0];
@@ -3098,6 +3202,7 @@ function stockMatch(d){
 }
 const scanStep=t=>{const p=$('#sc-p');if(p)p.textContent=t};
 const scanWait=t=>`<div class="loading"><span class="spin" aria-hidden="true"></span><p id="sc-p" role="status">${t}</p><button class="btn sm ghost" data-act="close-sheet">Annulla</button></div>`;
+/* Crea lotto: foto di etichetta o codice a barre -> prodotto del magazzino da aggiungere al lotto */
 async function scanLot(file,mode){
   const id=ui.scanId=(ui.scanId||0)+1;const live=()=>id===ui.scanId&&!$('#sheet').hidden;
   openSheet('Lettura in corso',scanWait(mode==='barcode'?'Leggo il codice a barre…':'Leggo l\'etichetta…'));
@@ -3120,6 +3225,7 @@ async function scanLot(file,mode){
     ${fld('lp-p','Prodotto',`<select class="in" id="lp-p">${p?'':'<option value="">Scegli…</option>'}${opts([...S.products].sort((a,b)=>a.name.localeCompare(b.name,'it')).map(x=>[x.id,`${x.name} · lotto ${x.lotto}`]),p?p.id:'')}</select>`,hint)}
     <button class="btn block" data-act="lot-pick">Aggiungi al lotto</button>`);
 }
+/* Magazzino: foto di etichetta o codice a barre -> modulo del nuovo prodotto già compilato */
 async function scanProd(file){
   const mode=ui.camMode;const id=ui.scanId=(ui.scanId||0)+1;const live=()=>id===ui.scanId&&!$('#sheet').hidden;
   openSheet('Lettura in corso',scanWait(mode==='barcode'?'Leggo il codice a barre…':'Leggo l\'etichetta…'));
