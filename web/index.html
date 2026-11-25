@@ -83,6 +83,7 @@ main{flex:1;padding-bottom:20px}
 /* type + home */
 .logo{font-size:30px;font-weight:700;letter-spacing:-.01em;text-align:center;color:var(--fg)}
 .logo b{color:var(--brand);font-weight:700}
+.logo small{font-size:.5em;font-weight:600;letter-spacing:.03em;color:var(--muted);margin-left:1px}
 .hero{padding-block:24px 8px}
 .hello{font-size:19px}
 .h2{font-size:19px;font-weight:600}
@@ -210,6 +211,9 @@ select.in{padding-right:8px}
 .tin .in{flex:1;min-width:0}
 .unit{color:var(--muted)}
 .q-row{display:flex;flex-direction:column;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
+.au-q.au-err{box-shadow:inset 3px 0 0 var(--bad);padding-left:10px}
+.au-q.au-err strong{color:var(--bad)}
+.row.rbtn{width:100%;border:0;border-bottom:1px solid var(--rowline);font:inherit;color:inherit;text-align:left;cursor:pointer}
 .q-row:last-of-type{border-bottom:0}
 .ranges{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:2px 12px}
 .range{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
@@ -448,6 +452,7 @@ input.file{height:auto;padding:10px;font-size:14px}
   - aggiornamenti successivi .......... blocchi aggiunti con le liste di modifiche del cliente
   - online: Supabase .................. login, sincronizzazione, foto online, password, Area LabService
   - lettura etichette e codici a barre  etichette con IA, EAN e GS1-128 (ZXing), Open Food Facts
+  - audit con la checklist OSA ....... 20 domande fisse (Regione Campania), esiti C/NCm/NCM/NA, verbale PDF
   - events ............................ ascoltatori globali e avvio dell'app
 
   MODELLO DATI (oggetto S, versione v:3)
@@ -462,7 +467,8 @@ input.file{height:auto;padding:10px;font-size:14px}
   clienti[], uscite[]               clienti e DDT in uscita (righe = lotti venduti)
   ricette[], menus[], team[]        ricette con allergeni, menu, personale con attestati
   extra{abb,scong,liev,ghiaccio}    schede extra: abbattimento, scongelamento, lievitazione, ghiaccio
-  reports[], docs[], audits[]       ispezioni, documentazione HACCP, punteggi audit
+  reports[], docs[], audits[]       ispezioni, documentazione HACCP, audit (v:2 = checklist OSA, risposte in ans)
+  docUp{files[]}                    documenti caricati dal cliente nella sezione Documentazione
   pest{ditta,checks[]}, manut{int[]} infestanti e manutenzioni
   retention                         anni di conservazione di lotti e DDT (cancellazione automatica)
   Le foto sono stringhe "data:image/...". Online vengono salvate nel deposito file e nei
@@ -776,7 +782,7 @@ const devices=()=>S.attrezzature.filter(a=>a.temp&&a.stato!=='Ferma');
 const recBad=r=>Object.values(r.c||{}).includes('nc');
 const devsOf=recs=>S.attrezzature.filter(a=>recs.some(r=>r.c&&r.c[a.id]));
 const shortOf=a=>a.short||(a.name.length<=11?a.name:a.name.slice(0,10)+'.');
-const lastAudit=()=>[...S.audits].sort((a,b)=>b.date.localeCompare(a.date))[0];
+const lastAudit=()=>[...S.audits].filter(a=>(a.tipo||'Audit interno')==='Audit interno').sort((a,b)=>b.date.localeCompare(a.date))[0];
 const auditDue=()=>{const l=lastAudit();if(!l)return TISO;const d=toDate(l.date);d.setMonth(d.getMonth()+2);return isoOf(d)};
 const pRng=d=>`${d.min>0?'+':''}${d.min}/${d.max>0?'+':''}${d.max} °C`;
 const tempKeys=()=>{const s=new Set(S.temps.map(r=>ym(r.date)));s.add(curYM);return [...s].sort().reverse()};
@@ -835,11 +841,11 @@ const LINKS={terms:'',privacy:''};
 const linkOr=(url,txt)=>url?`<a href="${esc(url)}" target="_blank" rel="noopener">${txt}</a>`:`<b>${txt}</b>`;
 function vLogin(){
   return `<main class="login pad stack">
-    <div class="logo" role="img" aria-label="labService"><b>lab</b>Service</div>
+    <div class="logo" role="img" aria-label="LabService srls"><b>Lab</b>Service <small>srls</small></div>
     <form data-form="login" class="stack" novalidate>
       ${fld('lg-u','Utente',inp('lg-u','u','','autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="es. nome.cognome"'))}
       <div class="field"><label for="lg-p">Password</label><div class="pwrap">${inp('lg-p','p','','type="password" autocomplete="current-password" placeholder="Inserisci la tua password"')}<button type="button" class="icbtn eye" data-act="pw-toggle" aria-label="Mostra la password" aria-pressed="false">${ic('eye',20)}</button></div></div>
-      <label class="consent"><input type="checkbox" name="ok" id="lg-ok"><span>Ho letto e accetto i ${linkOr(LINKS.terms,'Termini di Servizio')} e l'${linkOr(LINKS.privacy,'Informativa sulla Privacy')} di labService.</span></label>
+      <label class="consent"><input type="checkbox" name="ok" id="lg-ok"><span>Ho letto e accetto i ${linkOr(LINKS.terms,'Termini di Servizio')} e l'${linkOr(LINKS.privacy,'Informativa sulla Privacy')} di LabService.</span></label>
       ${errP}
       <div class="login-row"><button type="button" class="link" data-act="forgot">Hai dimenticato la password?</button><button class="btn" type="submit">Login</button></div>
     </form>
@@ -852,7 +858,7 @@ function vHome(){
   const ns=notifs();const un=unread();
   const dstr=`${GG[TODAY.getDay()]} ${TODAY.getDate()} ${MESI[TODAY.getMonth()].toLowerCase()}`;
   return `<div class="pad stack hero">
-    <div class="logo" role="img" aria-label="labService"><b>lab</b>Service</div>
+    <div class="logo" role="img" aria-label="LabService srls"><b>Lab</b>Service <small>srls</small></div>
     <div><p class="hello">Benvenuto/a <strong>${esc(me().first)}</strong></p><p class="muted">Stato HACCP di oggi, ${dstr}: ${todo?`${todo} attività da completare`:'tutto registrato'}.</p></div>
     <div class="grid2">
       <button class="btn hb" data-go="temperatura"><span>Temperatura</span><span class="bdg" aria-label="${done} verifiche su 2">${done}|2</span></button>
@@ -1177,7 +1183,7 @@ function auditInd(){
 function vAudit(){
   const ind=auditInd();const avg=Math.round(ind.reduce((a,[,v])=>a+v,0)/ind.length);
   const due=auditDue();const dd=daysTo(due);
-  const hist=[...S.audits].sort((a,b)=>b.date.localeCompare(a.date)).map(a=>`<div class="row flat pad"><span class="rh"><span class="r-title">Audit interno</span><span class="r-sub">${fmt(a.date)} · ${esc(a.by)}</span></span>${tag(lvl(a.score),a.score+'/100')}</div>`).join('');
+  const hist=[...S.audits].sort((a,b)=>b.date.localeCompare(a.date)).map(a=>`<button type="button" class="row flat pad rbtn" data-act="audit-view" data-id="${a.id}"><span class="rh"><span class="r-title">${esc(a.tipo||'Audit interno')}</span><span class="r-sub">${fmt(a.date)} · ${esc(a.by||'')}${a.esito?' · '+esc(a.esito):''}</span></span>${a.score!=null?tag(a.esito?(a.esito==='Non favorevole'?'bad':a.esito==='Favorevole'?'ok':'warn'):lvl(a.score),a.score+'/100'):''}</button>`).join('');
   return `<div class="pad stack blk">
     <div class="card">
       <div class="h-row"><strong>Prossimo audit interno</strong>${tag(dd<0?'bad':dd<=7?'warn':'ok',dd<0?`Scaduto da ${-dd} giorni`:`Entro il ${fmt(due)}`)}</div>
@@ -1188,14 +1194,14 @@ function vAudit(){
       <div class="stack" style="gap:4px"><strong>Indice di conformità del mese</strong><p class="muted">Calcolato in tempo reale dai registri di ${MESI[TODAY.getMonth()].toLowerCase()}.</p></div></div>
       ${ind.map(([l,v])=>`<div class="meter lv-${lvl(v)}"><span>${l}</span><b>${v}%</b><span class="bar"><i style="width:${v}%"></i></span></div>`).join('')}
     </div>
-    <button class="btn" data-act="audit-new">Avvia audit interno</button>
+    <button class="btn" data-act="audit-new">Avvia audit (checklist OSA Regione Campania)</button>
   </div>
-  <section class="blk">${sec('Audit interni svolti')}<div class="list">${hist||'<p class="empty pad">Nessun audit interno registrato.</p>'}</div></section>`;
+  <section class="blk">${sec('Audit svolti')}<div class="list">${hist||'<p class="empty pad">Nessun audit registrato.</p>'}</div></section>`;
 }
 function vDocumenti(){
   const rows=S.docs.map(d=>drow('dc-'+d.id,d.title,`<span class="r-title">${esc(d.title)}</span><span class="r-sub">${esc(d.rev)} · ${fmt(d.date)}</span>`,tag('info',`${d.alleg} allegat${d.alleg===1?'o':'i'}`),
     `<p>${esc(d.text.split('\n')[0])}</p><div class="actions"><button class="btn sm" data-act="doc-open" data-id="${d.id}">${ic('file',16)} Apri documento</button></div>`)).join('');
-  return `${tools('Cerca un documento…','dc-list')}${listWrap('dc-list',rows,'Nessun documento.')}`;
+  return `<div class="pad stack blk"><div class="card stack"><strong>Documenti dell'azienda</strong><p class="hint">Carica qui i documenti dell'attività: SCIA/NIA, planimetria, contratti, analisi di laboratorio, certificati, schede tecniche. Restano salvati online e li vede tutto il personale dell'azienda.</p>${filesBlock('cli:docs','Documenti caricati','Carica documento')}</div></div>${sec('Manuale e procedure HACCP')}${tools('Cerca un documento…','dc-list')}${listWrap('dc-list',rows,'Nessun documento.')}`;
 }
 function vInfestanti(){
   const cs=[...S.pest.checks].sort((a,b)=>b.date.localeCompare(a.date));
@@ -1326,7 +1332,7 @@ function drawerHTML(cur){
   const A=S.azienda;
   return `<div class="d-head"><span class="d-av" aria-hidden="true">LS</span><strong>${esc(A.nome)}</strong><span class="muted">${esc(A.settore)}</span><span class="addr">${esc(A.addr)}</span></div>
   <div class="d-items">${DITEMS.map(([k,i,l])=>`<button class="d-item${cur===k?' on':''}" data-go="${k}"${cur===k?' aria-current="page"':''}>${ic(i,22)}<span>${l}</span></button>`).join('')}</div>
-  <div class="d-foot"><div class="logo" aria-label="labService"><b>lab</b>Service</div><span class="ci">${ic('phone',18)} ${esc(A.tel)}</span><span class="ci">${ic('at',18)} ${esc(A.email)}</span></div>`;
+  <div class="d-foot"><div class="logo" aria-label="LabService srls"><b>Lab</b>Service <small>srls</small></div><span class="ci">${ic('phone',18)} ${esc(A.tel)}</span><span class="ci">${ic('at',18)} ${esc(A.email)}</span></div>`;
 }
 function render(v){
   ui.view=v;
@@ -2123,6 +2129,7 @@ function fileHost(t){
   if(k==='rep')return S.reports.find(x=>x.id===id);
   if(k==='ditta')return S.pest.ditta;
   if(k==='attr')return S.attrezzature.find(x=>x.id===id);
+  if(k==='cli'){if(!S.docUp)S.docUp={files:[]};return S.docUp}
   return null;
 }
 async function storeFiles(list){
@@ -2360,7 +2367,7 @@ Object.assign(ACT,{
     const D=extraData(ui.xtab,ids);const base=`${slug(D.title)}-${TISO}`;
     if(a.dataset.f==='csv')makeFile('csv',()=>Promise.resolve(toCSV(D.csvHead,D.csvRows)),base+'.csv');else makeFile('pdf',()=>regPDF(D),base+'.pdf')},
   xtab:a=>{ui.xtab=a.dataset.t;ui.xsel=new Set();rerender()},
-  up:a=>{ui.upT=a.dataset.t;const i=$('#up-file');i.value='';i.click()},
+  up:a=>{ui.upT=a.dataset.t;const i=$('#up-file');i.value='';i.accept=/^cli:/.test(a.dataset.t)?'image/*,application/pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.txt':'image/*,application/pdf';i.click()},
   'file-open':async a=>{
     try{const h=fileHost(a.dataset.t);const ref=((h&&h.files)||[]).find(x=>x.id===a.dataset.fid)||{name:'documento',type:''};
       const b=await IDB.get(a.dataset.fid);if(!b){toast('Questo file non è salvato su questo dispositivo');return}
@@ -2518,7 +2525,7 @@ Object.assign(ACT,{
   'area-del':a=>{const x=S.sanAreas.find(y=>y.id===a.dataset.id);if(!x)return;x.off=true;save();rerender();toast(`${x.name} tolto dalle aree da pulire`)},
   'doc-edit':a=>docEdit(a.dataset.id),
   'pay-edit':()=>payForm(),
-  'pay-info':()=>openSheet('Come funzionano i pagamenti',`<p>L'abbonamento si paga con addebito automatico sul conto (SEPA) o con carta. Il metodo si cambia da qui, in qualsiasi momento.</p><p>Ogni pagamento genera una ricevuta che trovi in questa pagina. Se un addebito non va a buon fine, l'app ti avvisa e riprova nei giorni successivi.</p><p>Per disdire o cambiare piano scrivi a labService: la modifica vale dal periodo successivo.</p>`)
+  'pay-info':()=>openSheet('Come funzionano i pagamenti',`<p>L'abbonamento si paga con addebito automatico sul conto (SEPA) o con carta. Il metodo si cambia da qui, in qualsiasi momento.</p><p>Ogni pagamento genera una ricevuta che trovi in questa pagina. Se un addebito non va a buon fine, l'app ti avvisa e riprova nei giorni successivi.</p><p>Per disdire o cambiare piano scrivi a LabService: la modifica vale dal periodo successivo.</p>`)
 });
 Object.assign(FORMS,{
   login:async f=>{const u=val(f,'u').toLowerCase(),p=f.elements.p.value;if(!u||!p)return ferr(f,'Inserisci utente e password.',[!u?'u':'p']);
@@ -2870,10 +2877,10 @@ function blankState(az){
   s.azienda={nome:az.nome||'',settore:az.settore||'',addr:az.indirizzo||'',piva:az.piva||'',pec:az.pec||'',tel:az.telefono||'',email:'',rap:az.referente||'',prep:''};
   s.retention=1;return s;
 }
-function bootMsg(html){document.body.classList.add('is-login');$('#drawer').innerHTML='';$('#app').innerHTML=`<main class="login pad stack"><div class="logo" role="img" aria-label="labService"><b>lab</b>Service</div>${html}</main>`}
+function bootMsg(html){document.body.classList.add('is-login');$('#drawer').innerHTML='';$('#app').innerHTML=`<main class="login pad stack"><div class="logo" role="img" aria-label="LabService srls"><b>Lab</b>Service <small>srls</small></div>${html}</main>`}
 const bootWait=t=>`<div class="loading"><span class="spin" aria-hidden="true"></span><p role="status">${t}</p></div>`;
 const bootErr=t=>`<div class="card stack"><p>${t}</p><button class="btn" data-act="reload">Riprova</button></div>`;
-function blockHTML(){return `<main class="login pad stack"><div class="logo" role="img" aria-label="labService"><b>lab</b>Service</div><div class="card stack"><strong>Accesso sospeso</strong><p>L'accesso di <b>${esc(C.ctx&&C.ctx.azienda?C.ctx.azienda.nome:'questa azienda')}</b> a HACCP Salus è sospeso. Per riattivarlo contatta LabService.</p><button class="btn sec" data-act="logout">Esci</button></div></main>`}
+function blockHTML(){return `<main class="login pad stack"><div class="logo" role="img" aria-label="LabService srls"><b>Lab</b>Service <small>srls</small></div><div class="card stack"><strong>Accesso sospeso</strong><p>L'accesso di <b>${esc(C.ctx&&C.ctx.azienda?C.ctx.azienda.nome:'questa azienda')}</b> a HACCP Salus è sospeso. Per riattivarlo contatta LabService.</p><button class="btn sec" data-act="logout">Esci</button></div></main>`}
 /* avvio online: carica la libreria Supabase, controlla se c'è una sessione, poi cloudEnter() */
 async function cloudBoot(){
   bootMsg(bootWait('Caricamento…'));
@@ -3251,6 +3258,185 @@ async function scanProd(file){
 {const _lp=ACT['lot-pick'];ACT['lot-pick']=a=>{const s=$('#lp-p');const p=S.products.find(x=>x.id===(s&&s.value));if(!p){toast('Scegli il prodotto dalla lista');return}const e=ui.pending&&ui.pending.ean;if(e&&!p.ean){p.ean=e;save()}_lp(a)}}
 {const _pm=ACT['prod-manual'];ACT['prod-manual']=a=>{ui.scanEan='';_pm(a)}}
 {const _p=FORMS.prod;FORMS.prod=f=>{const n=S.products.length;const r=_p(f);if(ui.scanEan&&S.products.length>n){S.products[S.products.length-1].ean=ui.scanEan;save()}ui.scanEan='';return r}}
+/* ---------- audit con la checklist universale OSA (Regione Campania) ----------
+   Domande fisse prese dal modello "Checklist universale di controllo ufficiale / audit (OSA)"
+   della Regione Campania. Ogni voce ha un esito: C conforme, NCm non conformità minore,
+   NCM non conformità maggiore, NA non applicabile. Punteggio: C = 1, NCm = 0,5, NCM = 0,
+   NA esclusa. Esito complessivo: nessuna NC = Favorevole, solo NCm = Favorevole con
+   prescrizioni, almeno una NCM = Non favorevole. */
+const AUDIT_SEC=[
+  {c:'1',t:'Requisiti amministrativi, notifica e sistema HACCP',ref:'Reg. (CE) 852/2004 art. 5-6 | Reg. (CE) 853/2004',q:[
+    ['1.1','Titolo abilitativo (NIA / SCIA sanitaria o riconoscimento CE)','Presenza della ricevuta di registrazione (SUAP/ASL) o decreto di riconoscimento (Approval Number). Coerenza tra attività autorizzate, planimetria e stato di fatto dei locali.','Tutti i settori'],
+    ['1.2','Piano di autocontrollo (manuale HACCP / procedure semplificate)','Documento presente in sede, aggiornato rispetto ai processi reali, con analisi dei pericoli (biologici, chimici, fisici, allergeni), individuazione dei PRP/oPRP/CCP e limiti critici.','Tutti i settori (adattato per complessità)'],
+    ['1.3','Registrazioni di monitoraggio e azioni correttive','Compilazione regolare e veritiera delle schede di controllo (temperature, ricevimento merci, sanificazione, manutenzione) ed evidenza delle azioni correttive in caso di superamento dei limiti.','Tutti i settori'],
+    ['1.4','Piano analitico di verifica e shelf-life','Esecuzione di analisi microbiologiche/chimiche su alimenti, superfici (tamponi) e acqua potabile (Reg. CE 2073/2005; D.Lgs. 18/2023). Studi di durabilità (shelf-life) per prodotti confezionati.','Produzione / Trasformazione / Ristorazione']]},
+  {c:'2',t:'Rintracciabilità, ritiro/richiamo e informazioni al consumatore',ref:'Reg. (CE) 178/2002 artt. 14, 18, 19 | Reg. (UE) 1169/2011',q:[
+    ['2.1','Rintracciabilità a monte (fornitori e materie prime)','Elenco aggiornato dei fornitori. Disponibilità immediata di DDT, fatture e documenti commerciali con indicazione chiara di natura, quantità, data consegna e lotto/partita di ogni ingrediente o imballaggio (MOCA).','Tutti i settori'],
+    ['2.2','Rintracciabilità interna (correlazione lotti di produzione)','Sistema documentale o informatico che collega i lotti delle materie prime e dei MOCA utilizzati ai lotti di semilavorati e prodotti finiti realizzati o riconfezionati.','Trasformazione / Confezionamento / Ristorazione'],
+    ['2.3','Rintracciabilità a valle (clienti B2B)','Registrazione dei destinatari commerciali (escluso il consumatore finale) con corrispondenza puntuale tra prodotto ceduto, quantità, data di spedizione e numero di lotto.','Produzione / Ingrosso / Logistica / Catering B2B'],
+    ['2.4','Procedura di ritiro/richiamo e gestione allerte (art. 19 Reg. 178/2002)','Procedura scritta per il blocco, ritiro dal mercato o richiamo dai consumatori di alimenti non sicuri, con notifica immediata all\'ASL competente. Verifica dell\'esito di test di simulazione periodici (recall test).','Tutti i settori'],
+    ['2.5','Etichettatura, allergeni e informazioni al consumatore','Correttezza etichette prodotti preimballati (Reg. UE 1169/2011; D.Lgs. 231/2017), cartello unico ingredienti per sfusi e registro/menu scritto per i 14 allergeni (All. II) nella somministrazione e vendita al dettaglio.','Tutti i settori']]},
+  {c:'3',t:'Requisiti strutturali, impiantistici, attrezzature e MOCA',ref:'Reg. (CE) 852/2004 All. I e II | Reg. (CE) 1935/2004',q:[
+    ['3.1','Layout, dimensioni e separazione funzionale (marcia in avanti)','Ampi spazi operativi per evitare contaminazioni crociate tra zone sporche e pulite, materie prime e prodotti finiti. Separazione fisica o temporale delle lavorazioni a rischio (es. senza glutine).','Tutti i settori'],
+    ['3.2','Superfici, pavimenti, pareti, soffitti e infissi','Materiali integri, lisci, lavabili, disinfettabili e atossici; assenza di crepe, muffe, condense, scrostature o ristagni d\'acqua. Finestre apribili dotate di reti antinsetto rimovibili e pulibili.','Tutti i settori'],
+    ['3.3','Servizi igienici, spogliatoi e postazioni lavamani','WC non comunicanti direttamente con locali alimenti (presenza antibagno), dotati di lavabo con comando non manuale (pedale/fotocellula), sapone erogatore e asciugamani monouso. Spogliatoi e armadietti a doppio scomparto.','Tutti i settori'],
+    ['3.4','Aerazione, illuminazione e approvvigionamento idrico','Cappe aspiranti efficienti, illuminazione adeguata con plafoniere protette contro la rottura. Acqua potabile da acquedotto pubblico o pozzo con giudizio di idoneità e manutenzione periodica filtri/addolcitori.','Tutti i settori'],
+    ['3.5','Impianti frigoriferi, cottura, trasporto e conformità MOCA','Celle/banchi frigo, abbattitori, vetrine calde e mezzi di trasporto (ATP) puliti, integri e muniti di termometri tarati/verificati. Dichiarazioni di conformità MOCA (Reg. 1935/2004) per imballaggi e attrezzature a contatto.','Tutti i settori']]},
+  {c:'4',t:'Sanificazione, controllo infestanti e gestione rifiuti / S.O.A.',ref:'Reg. (CE) 852/2004 All. II | Reg. (CE) 1069/2009',q:[
+    ['4.1','Piano di sanificazione (SSOP), prodotti chimici e stato igienico','Procedura scritta con frequenze, prodotti e concentrazioni. Assenza di sporco pregresso o incrostazioni su impianti, taglieri, affettatrici e guarnizioni. Detergenti/disinfettanti idonei con schede tecniche/sicurezza e stoccati in locale/armadio chiuso separato.','Tutti i settori'],
+    ['4.2','Lotta agli infestanti (pest control)','Assenza di tracce di roditori, blatte o insetti. Presenza di planimetria numerata delle postazioni (esche/trappole collanti/lampade UV), contratto o procedura di monitoraggio periodico e rapporti di intervento.','Tutti i settori'],
+    ['4.3','Gestione rifiuti, oli esausti e sottoprodotti di origine animale (S.O.A.)','Pattumiere con coperchio ad apertura a pedale nelle aree di lavoro. Deposito temporaneo rifiuti e oli vegetali esausti pulito e separato. Gestione S.O.A. (Cat. 1-2-3) con contenitori identificati e documenti commerciali di trasporto (Reg. CE 1069/2009).','Tutti i settori (S.O.A. ove applicabile)']]},
+  {c:'5',t:'Buone prassi igieniche (GMP), conservazione e personale',ref:'Reg. (CE) 852/2004 All. II Cap. VIII-XII | Normativa Reg. Campania',q:[
+    ['5.1','Stoccaggio derrate, rotazione scorte (FIFO/FEFO) e scadenze','Alimenti sollevati da terra su scaffali/pedane lavabili. Rispetto rotazione FIFO/FEFO. Assenza di prodotti scaduti (oltre data di scadenza), con confezioni danneggiate/rigonfie o privi di identificazione.','Tutti i settori'],
+    ['5.2','Rispetto catena del freddo/caldo e corrette prassi operative','Separazione tra alimenti crudi e cotti/pronti al consumo; contenitori chiusi ed etichettati con data apertura/abbattimento. Scongelamento controllato in cella frigo (+0/+4 °C); mantenimento caldo (≥ +60/+65 °C) o freddo (≤ +4 °C / -18 °C).','Tutti i settori'],
+    ['5.3','Igiene personale, abbigliamento protettivo e formazione alimentaristi','Indumenti da lavoro dedicati, puliti e di colore chiaro; copricapo contenitivo; assenza di monili/orologi; pulizia mani e gestione ferite. Presenza degli attestati di formazione alimentaristi in corso di validità (D.G.R.C. Regione Campania).','Tutti i settori']]}
+];
+const AUDIT_ITEMS=AUDIT_SEC.flatMap(s=>s.q.map(q=>({sec:s.c,cod:q[0],t:q[1],d:q[2],app:q[3]})));
+const AUDIT_ESITI=[['C','Conforme'],['NCm','Non conformità minore'],['NCM','Non conformità maggiore'],['NA','Non applicabile']];
+const AUDIT_AMBITI=['Produzione primaria','Trasformazione industriale / artigianale','Stabilimento riconosciuto (Reg. 853/2004)','Ristorazione pubblica / collettiva / bar','Commercio dettaglio / ingrosso / GDO','Deposito / logistica / trasporto','Vendita online / e-commerce / broker'];
+const AUDIT_TIPI=['Audit interno','Controllo ufficiale ASL','Audit cliente / ente certificatore'];
+const AUDIT_DRAFT='haccp-salus-audit-bozza';
+const aKey=c=>'e'+c.replace('.','_'),nKey=c=>'n'+c.replace('.','_');
+/* conteggi, punteggio ed esito di un insieme di risposte {cod:{e,n}} */
+function auditCalc(ans){
+  const k={C:0,NCm:0,NCM:0,NA:0,vuote:0};
+  AUDIT_ITEMS.forEach(i=>{const e=ans[i.cod]&&ans[i.cod].e;if(k[e]!=null)k[e]++;else k.vuote++});
+  const app=k.C+k.NCm+k.NCM;
+  const score=app?Math.round((k.C+k.NCm*0.5)/app*100):null;
+  const esito=k.NCM?'Non favorevole':k.NCm?'Favorevole con prescrizioni':'Favorevole';
+  return {...k,app,score,esito,lv:k.NCM?'bad':k.NCm?'warn':'ok'};
+}
+const esitoTag=a=>a.esito?tag(a.esito==='Non favorevole'?'bad':a.esito==='Favorevole'?'ok':'warn',a.esito):'';
+function formAns(f){const o={};AUDIT_ITEMS.forEach(i=>{const r=f.querySelector(`input[name=${aKey(i.cod)}]:checked`);o[i.cod]={e:r?r.value:'',n:(f.elements[nKey(i.cod)]||{}).value||''}});return o}
+function auditSummaryHTML(c){
+  return `<div class="h-row"><strong>Esito complessivo</strong>${c.vuote===AUDIT_ITEMS.length?tag('info','Da compilare'):tag(c.lv,c.esito)}</div>
+  <p class="hint">${c.C} conformi · ${c.NCm} NC minori · ${c.NCM} NC maggiori · ${c.NA} non applicabili${c.vuote?` · <b>${c.vuote} da compilare</b>`:''}${c.score!=null?` · punteggio ${c.score}/100`:''}</p>`;
+}
+const draftGet=()=>{try{return JSON.parse(localStorage.getItem(AUDIT_DRAFT)||'null')}catch(e){return null}};
+const draftSet=v=>{try{v?localStorage.setItem(AUDIT_DRAFT,JSON.stringify(v)):localStorage.removeItem(AUDIT_DRAFT)}catch(e){}};
+function auditForm(fresh){
+  const A=S.azienda,prev=[...S.audits].filter(a=>a.v===2).sort((a,b)=>b.date.localeCompare(a.date))[0]||{};
+  let d=fresh?null:draftGet();if(d&&d.az!==A.nome)d=null;
+  const m=(d&&d.meta)||{date:TISO,ora:new Date().toTimeString().slice(0,5),tipo:'Audit interno',asl:prev.asl||'',rs:A.nome||'',piva:A.piva||'',sede:A.addr||'',nia:prev.nia||A.nia||'',rap:A.rap||'',by:me()?me().name:'',ambito:prev.ambito||[],provv:'',termine:''};
+  const ans=(d&&d.ans)||{};
+  const item=i=>{const a=ans[i.cod]||{};return `<div class="q-row au-q" id="auq-${i.cod.replace('.','_')}">
+      <div class="stack" style="gap:3px"><strong>${i.cod} · ${esc(i.t)}</strong><span class="hint">${esc(i.d)}</span><span class="r-sub">${esc(i.app)}</span></div>
+      <div class="opts" role="radiogroup" aria-label="Esito ${i.cod}">${AUDIT_ESITI.map(([v,l])=>`<label class="segopt" title="${l}"><input type="radio" name="${aKey(i.cod)}" value="${v}"${a.e===v?' checked':''}><span>${v}</span></label>`).join('')}</div>
+      <input class="in" name="${nKey(i.cod)}" value="${esc(a.n||'')}" placeholder="Evidenze / note${/NC/.test(a.e||'')?' (obbligatorie)':''}" autocomplete="off" aria-label="Evidenze e note ${i.cod}">
+    </div>`};
+  openSheet('Audit · checklist OSA',`<form data-form="audit2" class="stack" novalidate>
+    <p class="muted">Checklist universale di controllo ufficiale / audit dell'OSA (Regione Campania), valida per tutti i settori della filiera. Per ogni voce scegli un esito; per le non conformità scrivi le evidenze.</p>
+    ${d?`<div class="card stack" style="gap:6px"><span>${tag('info','Bozza ripresa')} del ${fmt(d.when||TISO)}</span><div><button type="button" class="btn sm ghost" data-act="audit-fresh">Ricomincia da capo</button></div></div>`:''}
+    <div class="card stack au-leg" style="gap:4px"><span class="lbl">Legenda</span><span class="hint"><b>C</b> conforme: requisito pienamente soddisfatto. <b>NCm</b> non conformità minore: carenza lieve senza rischio immediato (prescrizione). <b>NCM</b> non conformità maggiore: violazione grave o rischio igienico-sanitario (sanzione/sospensione). <b>NA</b> non applicabile: voce non pertinente al ciclo produttivo.</span></div>
+    <fieldset class="fs stack"><legend>Dati dell'audit</legend>
+      ${fld('au-t','Tipo di audit',sel('au-t','tipo',AUDIT_TIPI,m.tipo))}
+      <div class="grid2">${fld('au-d','Data',inp('au-d','date',m.date,'type="date"'))}${fld('au-o','Ora',inp('au-o','ora',m.ora,'type="time"'))}</div>
+      ${fld('au-asl','ASL / Distretto',inp('au-asl','asl',m.asl,'autocomplete="off" placeholder="es. ASL Napoli 1 Centro, DS 25"'))}
+      ${fld('au-rs','Ragione sociale OSA',inp('au-rs','rs',m.rs,'autocomplete="off"'))}
+      <div class="grid2">${fld('au-pi','P.IVA / Cod. fiscale',inp('au-pi','piva',m.piva,'autocomplete="off"'))}${fld('au-nia','N. Reg. NIA / CE',inp('au-nia','nia',m.nia,'autocomplete="off"'))}</div>
+      ${fld('au-se','Sede operativa',inp('au-se','sede',m.sede,'autocomplete="off"'))}
+      ${fld('au-rp','Legale rappresentante / delegato',inp('au-rp','rap',m.rap,'autocomplete="off"'))}
+      ${fld('au-by','Eseguito da (valutatore o personale ASL)',inp('au-by','by',m.by,'autocomplete="off"'))}
+    </fieldset>
+    <fieldset class="fs"><legend>Ambito di applicazione</legend><div class="checks">${AUDIT_AMBITI.map(t=>`<label class="cbox"><input type="checkbox" name="amb" value="${esc(t)}"${(m.ambito||[]).includes(t)?' checked':''}><span>${esc(t)}</span></label>`).join('')}</div><span class="hint">Le voci non pertinenti al settore si segnano NA.</span></fieldset>
+    ${AUDIT_SEC.map(s=>`<fieldset class="fs"><legend>${s.c}. ${esc(s.t)}</legend><span class="hint">${esc(s.ref)}</span>${s.q.map(q=>item(AUDIT_ITEMS.find(i=>i.cod===q[0]))).join('')}</fieldset>`).join('')}
+    <fieldset class="fs stack"><legend>6. Riepilogo esito e provvedimenti</legend>
+      <div class="card stack" id="au-sum" style="gap:6px">${auditSummaryHTML(auditCalc(ans))}</div>
+      ${fld('au-pv','Provvedimenti / prescrizioni',area('au-pv','provv',m.provv,'Cosa va corretto e come'))}
+      ${fld('au-tm','Termine di adeguamento',inp('au-tm','termine',m.termine,'type="date"'),'Facoltativo')}
+    </fieldset>
+    ${errP}<button class="btn block" type="submit">Salva audit</button></form>`);
+}
+/* bozza salvata a ogni modifica, sullo stesso dispositivo */
+function auditDraftSave(f){
+  const g=n=>(f.elements[n]||{}).value||'';
+  draftSet({az:S.azienda.nome,when:TISO,ans:formAns(f),meta:{date:g('date'),ora:g('ora'),tipo:g('tipo'),asl:g('asl'),rs:g('rs'),piva:g('piva'),sede:g('sede'),nia:g('nia'),rap:g('rap'),by:g('by'),ambito:[...f.querySelectorAll('input[name=amb]:checked')].map(x=>x.value),provv:g('provv'),termine:g('termine')}});
+}
+function auditLive(f,t){
+  const c=auditCalc(formAns(f));const s=$('#au-sum');if(s)s.innerHTML=auditSummaryHTML(c);
+  if(t&&t.type==='radio'&&/^e\d/.test(t.name)){const n=f.elements['n'+t.name.slice(1)];if(n){n.placeholder='Evidenze / note'+(/NC/.test(t.value)?' (obbligatorie)':'');const q=n.closest('.au-q');if(q)q.classList.remove('au-err')}}
+  auditDraftSave(f);
+}
+document.addEventListener('input',e=>{const f=e.target.form;if(f&&f.dataset.form==='audit2')auditLive(f,e.target)});
+document.addEventListener('change',e=>{const f=e.target.form;if(f&&f.dataset.form==='audit2')auditLive(f,e.target)});
+FORMS.audit2=f=>{
+  f.querySelectorAll('.au-err').forEach(x=>x.classList.remove('au-err'));
+  const ans=formAns(f);
+  const miss=AUDIT_ITEMS.filter(i=>!ans[i.cod].e);
+  const mark=list=>{list.forEach(i=>{const q=$('#auq-'+i.cod.replace('.','_'));if(q)q.classList.add('au-err')});const q=$('#auq-'+list[0].cod.replace('.','_'));if(q)q.scrollIntoView({block:'center',behavior:'smooth'})};
+  if(miss.length){mark(miss);return ferr(f,`Manca l'esito di ${miss.length===1?'una voce':miss.length+' voci'}: ${miss.slice(0,6).map(i=>i.cod).join(', ')}${miss.length>6?'…':''}.`)}
+  const noEv=AUDIT_ITEMS.filter(i=>/NC/.test(ans[i.cod].e)&&!ans[i.cod].n.trim());
+  if(noEv.length){mark(noEv);return ferr(f,`Scrivi le evidenze delle non conformità: ${noEv.map(i=>i.cod).join(', ')}.`)}
+  const c=auditCalc(ans);if(!c.app)return ferr(f,'Almeno una voce deve essere applicabile.');
+  if(c.NCm+c.NCM&&!val(f,'provv'))return ferr(f,'Con non conformità indica i provvedimenti o le prescrizioni.',['provv']);
+  const m=missing(f,['date','rs']);if(m.length)return ferr(f,'Inserisci data e ragione sociale.',m);
+  S.audits.push({id:uid(),v:2,date:val(f,'date'),ora:val(f,'ora'),tipo:val(f,'tipo'),asl:val(f,'asl'),rs:val(f,'rs'),piva:val(f,'piva'),sede:val(f,'sede'),nia:val(f,'nia'),rap:val(f,'rap'),by:val(f,'by')||(me()?me().name:''),
+    ambito:[...f.querySelectorAll('input[name=amb]:checked')].map(x=>x.value),ans,provv:val(f,'provv'),termine:val(f,'termine'),score:c.score,esito:c.esito,conta:{C:c.C,NCm:c.NCm,NCM:c.NCM,NA:c.NA}});
+  draftSet(null);save();closeSheet(true);rerender();toast(`Audit salvato: ${c.esito}, ${c.score}/100`);
+};
+function auditView(id){
+  const a=S.audits.find(x=>x.id===id);if(!a){toast('Audit non trovato');return}
+  const del=`<button class="btn sm dng" data-act="ask-del" data-kind="audits" data-id="${a.id}" data-label="l'audit del ${fmt(a.date)}">${ic('trash',16)} Elimina</button>`;
+  if(a.v!==2){openSheet('Audit interno',`<div class="stack">${kv('Data:',fmt(a.date))}${kv('Eseguito da:',esc(a.by||''))}${kv('Punteggio:',a.score+'/100')}<p class="hint">Audit registrato con la vecchia lista di domande: non ha il dettaglio delle voci.</p><div class="actions">${del}</div></div>`);return}
+  const nc=AUDIT_ITEMS.filter(i=>/NC/.test((a.ans[i.cod]||{}).e));
+  openSheet(`${a.tipo} · ${fmt(a.date)}`,`<div class="stack">
+    <div class="card stack" style="gap:6px"><div class="h-row"><strong>Esito complessivo</strong>${esitoTag(a)}</div><p class="hint">${a.conta.C} conformi · ${a.conta.NCm} NC minori · ${a.conta.NCM} NC maggiori · ${a.conta.NA} non applicabili · punteggio ${a.score}/100</p></div>
+    ${kv('Data e ora:',fmt(a.date)+(a.ora?' ore '+esc(a.ora):''))}${a.asl?kv('ASL / Distretto:',esc(a.asl)):''}${kv('OSA:',esc(a.rs))}${a.nia?kv('N. Reg. NIA / CE:',esc(a.nia)):''}${kv('Eseguito da:',esc(a.by))}
+    ${a.ambito&&a.ambito.length?kv('Ambito:',esc(a.ambito.join(', '))):''}
+    ${nc.length?`<div class="stack" style="gap:8px"><span class="lbl">Non conformità</span>${nc.map(i=>{const x=a.ans[i.cod];return `<div class="card stack" style="gap:4px"><div class="h-row"><strong>${i.cod} · ${esc(i.t)}</strong>${tag(x.e==='NCM'?'bad':'warn',x.e)}</div><p>${esc(x.n)}</p></div>`}).join('')}</div>`:'<p class="hint">Nessuna non conformità rilevata.</p>'}
+    ${a.provv?`<div class="stack" style="gap:6px"><span class="lbl">Provvedimenti / prescrizioni</span><p>${esc(a.provv)}</p>${a.termine?`<p class="hint">Termine di adeguamento: ${fmt(a.termine)}</p>`:''}</div>`:''}
+    <div class="actions"><button class="btn sm" data-act="audit-pdf" data-id="${a.id}">${ic('file',16)} Scarica il verbale PDF</button>${del}</div></div>`);
+}
+/* verbale PDF dell'audit: stesso ordine e stesse voci della checklist */
+async function auditPDF(a){
+  const JP=await jsPDFLib();const doc=new JP({unit:'mm',format:'a4'});
+  const W=210,H=297,M=12,TW=W-2*M;const ink=()=>doc.setTextColor(23,32,26),grey=()=>doc.setTextColor(91,104,95);
+  let y=0;
+  const head=cont=>{ink();doc.setFont('helvetica','bold');doc.setFontSize(13);doc.text(pt(`${a.tipo} - Checklist universale OSA${cont?' (continua)':''}`),M,15);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);grey();
+    doc.text(pt('Modello di riferimento: Checklist universale di controllo ufficiale / audit (OSA) - Regione Campania. Reg. (CE) 178/2002, 852/2004, 853/2004, Reg. (UE) 1169/2011, 2017/625.'),M,20,{maxWidth:TW});y=27};
+  const need=h=>{if(y+h>H-16){doc.addPage();head(true)}};
+  head(false);
+  const meta=[['ASL / Distretto',a.asl],['Data e ora',fmt(a.date)+(a.ora?' ore '+a.ora:'')],['Ragione sociale OSA',a.rs],['P.IVA / Cod. fiscale',a.piva],['Sede operativa',a.sede],['N. Reg. NIA / CE',a.nia],['Legale rapp. / delegato',a.rap],['Eseguito da',a.by]];
+  doc.setFontSize(8.5);
+  for(let i=0;i<meta.length;i+=2){const row=meta.slice(i,i+2);let h=0;
+    row.forEach(([k,v],j)=>{const x=M+j*TW/2;doc.setFont('helvetica','bold');grey();doc.text(pt(k+':'),x,y+4);doc.setFont('helvetica','normal');ink();const l=doc.splitTextToSize(pt(v||'-'),TW/2-40);doc.text(l,x+36,y+4);h=Math.max(h,l.length*3.6)});
+    y+=h+2.4}
+  doc.setFont('helvetica','bold');grey();doc.text('Ambito:',M,y+4);doc.setFont('helvetica','normal');ink();const al=doc.splitTextToSize(pt((a.ambito||[]).join(', ')||'-'),TW-36);doc.text(al,M+36,y+4);y+=al.length*3.6+4;
+  doc.setFontSize(7.5);grey();const lg=doc.splitTextToSize(pt('C conforme. NCm non conformità minore: carenza lieve senza rischio immediato (prescrizione). NCM non conformità maggiore: violazione grave / rischio igienico-sanitario (sanzione / sospensione). NA non applicabile.'),TW);doc.text(lg,M,y+3);y+=lg.length*3.3+4;
+  const cw=[11,99,14,TW-124];
+  AUDIT_SEC.forEach(s=>{
+    need(20);doc.setFillColor(214,232,215);doc.rect(M,y,TW,8,'F');ink();doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.text(pt(`${s.c}. ${s.t.toUpperCase()}`),M+1.5,y+5.3);
+    doc.setFont('helvetica','normal');doc.setFontSize(6.8);grey();doc.text(pt(s.ref),W-M-1.5,y+5.3,{align:'right'});y+=8;
+    doc.setFont('helvetica','bold');doc.setFontSize(7.5);ink();['Cod.','Elemento di verifica','Esito','Evidenze / note'].forEach((t,i)=>doc.text(t,M+1+cw.slice(0,i).reduce((p,c)=>p+c,0),y+4));y+=6;
+    s.q.forEach(q=>{const x=(a.ans||{})[q[0]]||{};
+      doc.setFontSize(8.2);doc.setFont('helvetica','bold');const tl=doc.splitTextToSize(pt(q[1]),cw[1]-2);
+      doc.setFont('helvetica','normal');doc.setFontSize(7);const dl=doc.splitTextToSize(pt(q[2]),cw[1]-2);
+      doc.setFontSize(8.2);const nl=doc.splitTextToSize(pt(x.n||''),cw[3]-2);
+      const h=Math.max(tl.length*3.5+dl.length*3+2,nl.length*3.6,5)+3;need(h);
+      let cx=M;ink();doc.setFont('helvetica','bold');doc.setFontSize(8.2);doc.text(q[0],cx+1,y+3.8);cx+=cw[0];
+      doc.text(tl,cx+1,y+3.8);doc.setFont('helvetica','normal');doc.setFontSize(7);grey();doc.text(dl,cx+1,y+3.8+tl.length*3.5);cx+=cw[1];
+      doc.setFont('helvetica','bold');doc.setFontSize(8.5);if(x.e==='NCM')doc.setTextColor(198,40,40);else if(x.e==='NCm')doc.setTextColor(178,106,0);else if(x.e==='C')doc.setTextColor(46,125,50);else grey();doc.text(x.e||'-',cx+1,y+3.8);cx+=cw[2];
+      doc.setFont('helvetica','normal');doc.setFontSize(8.2);ink();doc.text(nl,cx+1,y+3.8);
+      y+=h;doc.setDrawColor(211,219,213);doc.line(M,y,W-M,y)});
+    y+=3});
+  need(60);y+=4;doc.setFillColor(214,232,215);doc.rect(M,y,TW,8,'F');ink();doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.text('6. RIEPILOGO ESITO AUDIT E PROVVEDIMENTI ADOTTATI',M+1.5,y+5.3);y+=13;
+  doc.setFontSize(10);doc.text(pt(`Esito complessivo: ${a.esito}`),M,y);y+=5;
+  doc.setFont('helvetica','normal');doc.setFontSize(8.5);grey();doc.text(pt(`${a.conta.C} conformi - ${a.conta.NCm} NC minori - ${a.conta.NCM} NC maggiori - ${a.conta.NA} non applicabili - punteggio ${a.score}/100 (C = 1, NCm = 0,5, NCM = 0, NA escluse)`),M,y);y+=7;
+  ink();doc.setFont('helvetica','bold');doc.text('Provvedimenti / prescrizioni / termine adeguamento:',M,y);y+=4.5;doc.setFont('helvetica','normal');
+  const pl=doc.splitTextToSize(pt((a.provv||'Nessuno.')+(a.termine?` Termine di adeguamento: ${fmt(a.termine)}.`:'')),TW);need(pl.length*3.8+30);doc.text(pl,M,y);y+=pl.length*3.8+14;
+  need(22);doc.setFontSize(8);grey();doc.text(pt("Firma dell'OSA o delegato"),M,y);doc.text('Firma del valutatore',W/2+6,y);doc.setDrawColor(23,32,26);doc.line(M,y+12,M+80,y+12);doc.line(W/2+6,y+12,W-M,y+12);
+  const N=doc.getNumberOfPages();
+  for(let i=1;i<=N;i++){doc.setPage(i);doc.setFont('helvetica','normal');doc.setFontSize(7.5);grey();doc.text(pt(`${a.rs} - documento di autocontrollo generato con HACCP Salus il ${fmt(TISO)}`),M,H-7);doc.text(`Pagina ${i} di ${N}`,W-M,H-7,{align:'right'})}
+  return doc.output('blob');
+}
+Object.assign(ACT,{
+  'audit-new':()=>auditForm(false),
+  'audit-fresh':()=>{draftSet(null);auditForm(true)},
+  'audit-view':a=>auditView(a.dataset.id),
+  'audit-pdf':a=>{const x=S.audits.find(y=>y.id===a.dataset.id);if(x)makeFile('pdf',()=>auditPDF(x),`audit-${x.date}-${slug(x.rs||'osa')}.pdf`)}
+});
+
 /* ---------- events ---------- */
 document.addEventListener('click',e=>{
   const g=e.target.closest('[data-go]');
