@@ -457,6 +457,7 @@ input.file{height:auto;padding:10px;font-size:14px}
   - online: Supabase .................. login, sincronizzazione, foto online, password, Area LabService
   - lettura etichette e codici a barre  etichette con IA, EAN e GS1-128 (ZXing), Open Food Facts
   - audit con la checklist OSA ....... 20 domande fisse (Regione Campania), esiti C/NCm/NCM/NA, verbale PDF
+  - piano di campionatura ............ voci libere con rapporti di prova (Documentazione, scheda Campionatura)
   - events ............................ ascoltatori globali e avvio dell'app
 
   MODELLO DATI (oggetto S, versione v:3)
@@ -774,7 +775,6 @@ const CHECKS=[['pul','Pulizia del mezzo'],['int','Integrità imballo'],['sca','S
 const MOTIVI=["Temperatura all'arrivo fuori range",'Imballo danneggiato','Scadenza troppo vicina','Etichetta mancante o illeggibile',"Prodotto diverso dall'ordine"];
 const TS={ok:['Conforme','ok'],tol:['In tolleranza','warn'],bad:['Non conforme','bad']};
 const QUAL={Buona:'ok',Discreta:'warn','Da migliorare':'bad'};
-const AUDIT_Q=['Le temperature delle celle sono registrate due volte al giorno?','Ogni non conformità ha la sua azione correttiva scritta?','Il piano di sanificazione è rispettato e firmato?','I prodotti in magazzino hanno lotto e scadenza leggibili?','I semilavorati sono etichettati con la data di produzione?','Gli allergeni sono conservati separati e identificati?','L\'abbattimento porta i prodotti a +3 °C entro 90 minuti?','Tutto il personale ha l\'attestato HACCP valido?','Le trappole per infestanti sono controllate ogni settimana?','Le attrezzature hanno la manutenzione registrata?'];
 const AREE_PEST=['Ingresso merci','Laboratorio','Magazzino secco','Area esterna'];
 
 /* ---------- domain helpers ---------- */
@@ -1733,12 +1733,6 @@ function repForm(){
     ${fld('rpf-f','Documenti e foto (facoltativo)','<input class="in file" type="file" id="rpf-f" name="files" accept="image/*,application/pdf" multiple>')}
     ${errP}<button class="btn block" type="submit">Salva report</button></form>`);
 }
-function auditForm(){
-  openSheet('Audit interno',`<form data-form="audit" class="stack" novalidate>
-    <p class="muted">Rispondi a tutte le domande. Il punteggio è la percentuale di risposte "Sì".</p>
-    ${AUDIT_Q.map((q,i)=>`<fieldset class="fs q-row"><legend>${i+1}. ${esc(q)}</legend><div class="opts">${['Sì','No'].map(o=>`<label class="segopt"><input type="radio" name="q${i}" value="${o}"><span>${o}</span></label>`).join('')}</div></fieldset>`).join('')}
-    ${errP}<button class="btn block" type="submit">Calcola e salva</button></form>`);
-}
 function pestForm(){
   openSheet('Intervento effettuato',`<form data-form="pest" class="stack" novalidate>
     ${fld('pe-d','Data',inp('pe-d','date',TISO,'type="date"'))}
@@ -2245,7 +2239,6 @@ const ACT={
   'team-add':()=>teamForm(),
   'forn-add':()=>fornForm(),
   'rep-add':()=>repForm(),
-  'audit-new':()=>auditForm(),
   'pest-new':()=>pestForm(),
   'pest-ditta':()=>pestDitta(),
   'man-new':()=>manForm(),
@@ -2356,8 +2349,6 @@ const FORMS={
   forn:f=>{const m=missing(f,['name']);if(m.length)return ferr(f,'Inserisci la ragione sociale.',m);S.fornitori.push({id:uid(),name:val(f,'name'),piva:val(f,'piva').replace(/\D/g,''),cat:val(f,'cat')||'—',sede:val(f,'sede')||'—',legale:val(f,'sede')||'—',rep:val(f,'rep')||'—',tel:val(f,'tel')||'—',email:val(f,'email')||'—',pec:val(f,'pec')||'—',docs:[],note:''});save();closeSheet(true);rerender();toast('Fornitore salvato')},
   rep:f=>{const m=missing(f,['date','text']);if(m.length)return ferr(f,'Inserisci data ed esito.',m);const q=(f.querySelector('input[name=qual]:checked')||{}).value||'Buona';
     S.reports.push({id:uid(),title:val(f,'title'),date:val(f,'date'),qual:q,resp:val(f,'resp'),text:val(f,'text'),azioni:val(f,'azioni')});save();closeSheet(true);rerender();toast('Report salvato')},
-  audit:f=>{const ans=AUDIT_Q.map((_,i)=>(f.querySelector(`input[name=q${i}]:checked`)||{}).value);const miss=ans.findIndex(a=>!a);if(miss>=0)return ferr(f,`Rispondi alla domanda ${miss+1}.`);
-    const score=Math.round(ans.filter(a=>a==='Sì').length/AUDIT_Q.length*100);S.audits.push({id:uid(),date:TISO,score,by:me().name});save();closeSheet(true);rerender();toast(`Audit interno salvato: ${score}/100`)},
   pest:f=>{const tr=AREE_PEST.some((_,i)=>val(f,'a'+i)==='Tracce rilevate');if(tr&&!val(f,'note'))return ferr(f,'Descrivi le tracce rilevate e cosa hai fatto.',['note']);
     const where=AREE_PEST.filter((_,i)=>val(f,'a'+i)==='Tracce rilevate');
     S.pest.checks.push({id:uid(),date:TISO,esito:tr?'Tracce rilevate':'Nessuna traccia',by:val(f,'by'),note:(where.length?`Aree: ${where.join(', ')}. `:'')+val(f,'note')});save();closeSheet(true);rerender();toast('Controllo visivo registrato')},
