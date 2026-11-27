@@ -176,6 +176,10 @@ main{flex:1;padding-bottom:20px}
 .tabs::-webkit-scrollbar{display:none}
 .tab{display:flex;align-items:center;gap:6px;white-space:nowrap;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);font-size:14px;color:var(--fg);flex:none}
 .tab.on{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+.tabs.fit{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));overflow:visible}
+.tabs.fit .tab{justify-content:center;padding:9px 4px;font-size:14px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.tabn{font-size:12px;font-weight:600;min-width:20px;padding:1px 6px;border-radius:999px;background:var(--line);color:var(--fg);text-align:center}
+.tab.on .tabn{background:rgba(255,255,255,.25);color:inherit}
 
 /* forms */
 .field{display:flex;flex-direction:column;gap:6px;min-width:0}
@@ -1202,7 +1206,13 @@ function vAudit(){
 function vDocumenti(){
   const rows=S.docs.map(d=>drow('dc-'+d.id,d.title,`<span class="r-title">${esc(d.title)}</span><span class="r-sub">${esc(d.rev)} · ${fmt(d.date)}</span>`,tag('info',`${d.alleg} allegat${d.alleg===1?'o':'i'}`),
     `<p>${esc(d.text.split('\n')[0])}</p><div class="actions"><button class="btn sm" data-act="doc-open" data-id="${d.id}">${ic('file',16)} Apri documento</button></div>`)).join('');
-  return `<div class="pad stack blk"><div class="card stack"><strong>Documenti dell'azienda</strong><p class="hint">Carica qui i documenti dell'attività: SCIA/NIA, planimetria, contratti, analisi di laboratorio, certificati, schede tecniche. Restano salvati online e li vede tutto il personale dell'azienda.</p>${filesBlock('cli:docs','Documenti caricati','Carica documento')}</div></div>${sec('Manuale e procedure HACCP')}${tools('Cerca un documento…','dc-list')}${listWrap('dc-list',rows,'Nessun documento.')}${campBlock()}`;
+  /* tre schede separate: manuale HACCP, documenti caricati dal cliente, piano di campionatura */
+  const t=ui.docTab||'man',nUp=((S.docUp||{}).files||[]).length,nCp=(S.campionatura||[]).length;
+  const DT=[['man','Manuale',S.docs.length],['up','Documenti',nUp],['camp','Campionatura',nCp]];
+  const tabs=`<div class="tabs fit pad" role="tablist" aria-label="Sezioni della documentazione">${DT.map(([k,l,n])=>`<button class="tab${k===t?' on':''}" role="tab" aria-selected="${k===t}" data-act="doc-tab" data-t="${k}">${l}</button>`).join('')}</div>`;
+  if(t==='up')return `${tabs}<div class="pad stack blk"><p class="hint">I documenti dell'attività: SCIA/NIA, planimetria, contratti, analisi di laboratorio, certificati, schede tecniche. Restano salvati online e li vede tutto il personale dell'azienda.</p><div class="card stack">${filesBlock('cli:docs','Documenti caricati','Carica documento')}</div></div>`;
+  if(t==='camp')return `${tabs}${campBlock()}`;
+  return `${tabs}<div class="pad"><p class="hint">Manuale di autocontrollo e procedure HACCP dell'azienda. Tocca un documento per aprirlo o modificarlo.</p></div>${tools('Cerca un documento…','dc-list')}${listWrap('dc-list',rows,'Nessun documento.')}`;
 }
 function vInfestanti(){
   const cs=[...S.pest.checks].sort((a,b)=>b.date.localeCompare(a.date));
@@ -3447,9 +3457,8 @@ const CAMP_QUICK=['Tamponi superfici','Acqua potabile','Prodotti finiti','Materi
 function campBlock(){
   const L=S.campionatura||[];
   const rows=L.map(c=>`<button type="button" class="row flat pad rbtn" data-act="camp-open" data-id="${c.id}"><span class="rh"><span class="r-title">${esc(c.voce)}</span><span class="r-sub">${c.freq?esc(c.freq)+' · ':''}${c.desc?esc(c.desc.split('\n')[0].slice(0,80)):'Nessuna descrizione'}</span></span>${(c.files||[]).length?tag('info',`${c.files.length} allegat${c.files.length===1?'o':'i'}`):''}</button>`).join('');
-  return `${sec('Piano di campionatura')}<div class="pad" style="padding-top:0"><p class="hint">Cosa si campiona, con che frequenza e come. Scrivi liberamente e aggiungi tutte le voci che servono; a ogni voce puoi allegare i rapporti di prova del laboratorio.</p></div>
-  ${rows?`<div class="list">${rows}</div>`:'<p class="empty pad">Nessuna voce nel piano di campionatura.</p>'}
-  <div class="pad"><button class="btn ghost" data-act="camp-new">${ic('plus',16)} Aggiungi voce</button></div>`;
+  return `<div class="pad stack blk" style="gap:12px"><p class="hint">Piano di campionatura: cosa si campiona, con che frequenza e come. Scrivi liberamente e aggiungi tutte le voci che servono; a ogni voce puoi allegare i rapporti di prova del laboratorio.</p><div><button class="btn" data-act="camp-new">${ic('plus',16)} Aggiungi voce</button></div></div>
+  ${rows?`<div class="list">${rows}</div>`:'<p class="empty pad">Nessuna voce nel piano di campionatura.</p>'}`;
 }
 function campForm(id){
   const c=id?(S.campionatura||[]).find(x=>x.id===id):null;if(id&&!c)return;
@@ -3478,6 +3487,7 @@ FORMS.camp=f=>{
   save();rerender();campSheet(c.id);toast(id?'Voce salvata':`${v} aggiunto al piano di campionatura`);
 };
 Object.assign(ACT,{
+  'doc-tab':a=>{ui.docTab=a.dataset.t;rerender();window.scrollTo(0,0)},
   'camp-new':()=>campForm(null),
   'camp-edit':a=>campForm(a.dataset.id),
   'camp-open':a=>campSheet(a.dataset.id),
