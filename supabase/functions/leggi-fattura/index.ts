@@ -30,7 +30,10 @@ Rispondi SOLO con un oggetto JSON con questa forma, senza altro testo:
 Regole:
 - Il fornitore è chi emette il documento. Il destinatario è ${clip(azienda.nome, 80)} (P.IVA ${clip(azienda.piva, 16)}): non usarlo come fornitore.
 - Una riga per ogni prodotto alimentare. Ignora trasporto, spese, sconti, imponibile, IVA e totali.
-- "prodotto" è la descrizione senza codice articolo e senza peso. "confezioni" è la quantità di confezioni o pezzi; "peso_kg" è il peso di una singola confezione, solo se scritto.
+- "prodotto" è la descrizione senza codice articolo e senza peso.
+- "confezioni" è il numero della colonna quantità (Q.tà, Quantità, Colli, Pezzi, N.), copiato così com'è.
+- "peso_kg" è il peso scritto sulla riga (nella descrizione o nella colonna del peso), copiato così com'è e solo convertito in kg (500 g = 0.5). NON fare calcoli: non dividere il peso per la quantità e non moltiplicarlo. Esempio: "Farina 00 | Q.tà 4 | 100 kg" → confezioni 4, peso_kg 100 (cioè 4 confezioni da 100 kg).
+- Se la quantità è espressa direttamente in kg (unità di misura KG) e non c'è un numero di confezioni, usa confezioni 1 e peso_kg uguale a quella quantità.
 - Lotto e scadenza possono stare in colonne dedicate o sotto la descrizione.
 - Se un dato non è leggibile o non c'è, usa null. Non inventare lotti, scadenze o numeri.
 Fornitori già registrati, se uno corrisponde usa lo stesso nome: ${elenco || "nessuno"}.`;
