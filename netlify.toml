@@ -1,0 +1,5 @@
+# Netlify: pubblica la cartella web/ così com'è (nessuna compilazione)
+[build]
+  base = "web"
+  publish = "."
+  command = ""
