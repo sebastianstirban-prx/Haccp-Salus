@@ -18,8 +18,9 @@ Realizzata da Proxima Studio.
 │   │   ├── 20261125000001_schema_iniziale.sql
 │   │   └── 20261125000002_azienda_demo_flag.sql
 │   └── functions/                  Funzioni lato server (Edge Functions, Deno)
-│       ├── admin-utenti/index.ts   Area LabService: aziende, utenti, password, sospensioni
-│       └── leggi-fattura/index.ts  Lettura con l'IA di fatture ed etichette da foto
+│       ├── admin-utenti/index.ts   Area LabService: aziende, utenti, password, sospensioni, piano e prezzo
+│       ├── leggi-fattura/index.ts  Lettura con l'IA di fatture ed etichette da foto
+│       └── pagamenti/index.ts      Abbonamenti Stripe: checkout, portale clienti, webhook, stato
 ├── docs/
 │   └── HACCP-Salus-guida-rapida.pdf   Manuale d'uso breve per gli utenti
 └── README.md
@@ -34,6 +35,18 @@ Realizzata da Proxima Studio.
 | Deposito file | Supabase Storage, bucket privato `foto` | Foto e documenti, in una cartella per azienda: `<id azienda>/img/…` e `<id azienda>/doc/…`. |
 | `admin-utenti` | Edge Function | Solo per utenti con `admin = true`: crea aziende e utenti, genera password, sospende e riattiva. |
 | `leggi-fattura` | Edge Function | Manda la foto a Claude (Anthropic) e restituisce i dati della fattura o, con `tipo: "etichetta"`, dell'etichetta. |
+| `pagamenti` | Edge Function | Abbonamenti con Stripe: pagina di pagamento, portale clienti (carta, fatture, disdetta), webhook che aggiorna lo stato. |
+
+### Abbonamenti (Stripe)
+
+- Ogni azienda cliente paga LabService dall'app. In Area LabService → Modifica dati si sceglie per ogni azienda: **pagamento con carta (Stripe)** oppure **gestito da LabService** (nessun pagamento in app), **piano mensile o annuale** e **prezzo** (IVA inclusa).
+- Primo abbonamento: **7 giorni di prova** con la carta inserita subito; poi l'addebito parte da solo. Una seconda prova non è prevista.
+- Pagamento non riuscito: avviso in Home e **3 giorni di tolleranza**, poi l'app si blocca finché la carta non viene aggiornata. I dati restano.
+- La regola sta nel database (`public.abbonamento_ok`): il salvataggio viene rifiutato anche se qualcuno aggira l'interfaccia.
+- Stato in `aziende` (`sub_stato`, `prova_fine`, `sub_fine_periodo`, `insoluto_dal`…), aggiornato dal webhook di Stripe e a ogni accesso.
+- Il webhook non usa il segreto di firma: la funzione rilegge ogni evento da Stripe con la chiave segreta, quindi un evento inventato non cambia nulla.
+- Prodotto, portale e webhook su Stripe si creano da soli (Area LabService → Pagamenti Stripe → Verifica collegamento), sia in modalità di prova sia reale.
+- Stripe emette ricevute; la **fattura elettronica SDI** resta a carico di LabService.
 
 ### Modalità dell'app
 
@@ -73,7 +86,7 @@ Per aggiungere un tasto: `data-act="mio-tasto"` nell'HTML e `ACT['mio-tasto']=a=
 |---|---|---|
 | `ANTHROPIC_API_KEY` | sì | Lettura di fatture ed etichette con l'IA. |
 | `CLAUDE_MODEL` | no | Modello da usare; se manca, `claude-sonnet-5-5`. |
-| `STRIPE_SECRET_KEY` | quando si attiva Stripe | Pagamento degli abbonamenti (fase 2). |
+| `STRIPE_SECRET_KEY` | per i pagamenti | Abbonamenti Stripe. `sk_test_…` per le prove, `sk_live_…` per incassare davvero. |
 
 `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` li fornisce Supabase da sé. Le chiavi segrete non vanno mai nel codice: in `index.html` c'è solo la chiave pubblica di Supabase, che può stare lì perché i permessi li decidono le regole del database.
 
@@ -93,10 +106,9 @@ Per aggiungere un tasto: `data-act="mio-tasto"` nell'HTML e `ACT['mio-tasto']=a=
 
 ## Prossimi passi
 
-1. **Stripe**: abbonamento pagato da ogni azienda cliente dall'app, prova di 7 giorni, blocco dopo 3 giorni di tolleranza sul pagamento non riuscito.
-2. **Notifiche push** (richiedono manifest e service worker).
-3. Lettura dei file **XML della fattura elettronica**.
-4. Divisione di `index.html` in più file (moduli per sezione) prima di nuove funzioni grandi.
+1. **Notifiche push** (richiedono manifest e service worker).
+2. Lettura dei file **XML della fattura elettronica**.
+3. Divisione di `index.html` in più file (moduli per sezione) prima di nuove funzioni grandi.
 
 ## Prima della produzione
 

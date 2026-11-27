@@ -436,6 +436,7 @@ input.file{height:auto;padding:10px;font-size:14px}
     utente vede solo la propria azienda.
   - Funzione admin-utenti: Area LabService (crea aziende e utenti, password, sospensioni).
   - Funzione leggi-fattura: lettura con IA di fatture ed etichette (segreto ANTHROPIC_API_KEY).
+  - Funzione pagamenti: abbonamenti Stripe, checkout, portale clienti, webhook (segreto STRIPE_SECRET_KEY).
 
   MAPPA DEL FILE (cerca i titoli "---------- nome ----------")
   - costanti e configurazione ......... date, elenchi fissi (allergeni, tipi di attrezzatura...)
@@ -460,6 +461,7 @@ input.file{height:auto;padding:10px;font-size:14px}
   - piano di campionatura ............ voci libere con rapporti di prova (Documentazione, scheda Campionatura)
   - rintracciabilità di un lotto ...... dal lotto della materia prima a lotti di produzione e clienti (DDT), rapporto PDF
   - scarico del magazzino da ricetta .. Crea lotto con ricetta: ingredienti × quantità prodotta, scalati dal magazzino
+  - abbonamento con Stripe ............ prezzo e piano per azienda, 7 giorni di prova, 3 giorni di tolleranza (funzione pagamenti)
   - events ............................ ascoltatori globali e avvio dell'app
 
   MODELLO DATI (oggetto S, versione v:3)
@@ -2853,6 +2855,7 @@ async function cloudPush(){
     C.dirty=true;C.err++;
     const m=String((e&&e.message)||e||'');
     if(/abbonamento non attivo/i.test(m)){C.block='sospesa';route()}
+    else if(/pagamento richiesto/i.test(m)){C.block='pagamento';route()}
     else{if(C.err===1)toast('Non riesco a salvare online: riprovo da solo appena torna la connessione');clearTimeout(C.timer);C.timer=setTimeout(cloudPush,Math.min(60000,3000*C.err))}
   }finally{
     C.saving=false;
@@ -2916,6 +2919,7 @@ async function cloudEnter(){
   C.mustPw=!!ctx.profilo.must_change_pw;
   if(ctx.profilo.admin&&!DITEMS.some(d=>d[0]==='admin'))DITEMS.push(['admin','users','Area LabService']);
   if(!ctx.azienda.attivo){C.block='sospesa';route();return}
+  if(!(await payGate(ctx)))return;   /* abbonamento Stripe: prova, attivo o 3 giorni di tolleranza */
   let st;try{st=await fetchState()}catch(e){bootMsg(bootErr('Non riesco a caricare i tuoi dati. Controlla la connessione e riprova.'));return}
   const m=metaGet(),az=ctx.azienda.id,cache=lsGet(CKEY);
   const same=!!cache&&m.az===az;
@@ -2997,7 +3001,7 @@ function vAdmin(){
     <div class="stack" id="adm-list">
     ${aziende.map(a=>{const us=utenti.filter(u=>u.azienda_id===a.id);const q=[a.nome,a.piva,a.settore,...us.flatMap(u=>[u.nome,u.username])].join(' ').toLowerCase();
       return `<div class="card stack" data-q="${esc(q)}">
-      <div class="h-row"><div style="min-width:0"><strong>${esc(a.nome)}</strong><p class="muted">${esc([a.settore,a.piva?'P.IVA '+a.piva:'',a.indirizzo].filter(Boolean).join(' · ')||'Dati da completare')}</p></div>${a.attivo?tag('ok','Attiva'):tag('bad','Sospesa')}</div>
+      <div class="h-row"><div style="min-width:0"><strong>${esc(a.nome)}</strong><p class="muted">${esc([a.settore,a.piva?'P.IVA '+a.piva:'',a.indirizzo].filter(Boolean).join(' · ')||'Dati da completare')}</p></div>${a.attivo?tag('ok','Attiva'):tag('bad','Sospesa')}</div>${admSubLine(a)}
       <div class="ilist">${us.length?us.map(u=>`<div class="ili" style="flex-wrap:wrap"><span><strong>${esc(u.nome)}</strong>${u.admin?' '+tag('info','LabService'):''}${!u.attivo?' '+tag('bad','Disattivato'):''}${u.attivo&&u.must_change_pw?' '+tag('warn','Primo accesso da fare'):''}<br><span class="r-sub"><span class="mono">${esc(u.username)}</span>${u.descrizione?' · '+esc(u.descrizione):''} · ${u.ultimo_accesso?'ultimo accesso '+fmt(u.ultimo_accesso.slice(0,10)):'mai entrato'}</span></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button class="btn sm sec" data-act="adm-u-pw" data-u="${esc(u.username)}">Nuova password</button><button class="btn sm ghost" data-act="adm-u-on" data-u="${esc(u.username)}" data-on="${u.attivo?'0':'1'}">${u.attivo?'Disattiva':'Riattiva'}</button></span></div>`).join(''):'<p class="muted" style="padding:8px 0">Nessun utente: aggiungine uno.</p>'}</div>
       <div class="h-row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="adm-u-new" data-az="${a.id}">${ic('plus',16)} Aggiungi utente</button><button class="btn sm sec" data-act="adm-az-edit" data-az="${a.id}">Modifica dati</button><button class="btn sm ghost" data-act="adm-az-on" data-az="${a.id}" data-on="${a.attivo?'0':'1'}">${a.attivo?'Sospendi accesso':'Riattiva accesso'}</button></div>
     </div>`}).join('')}
@@ -3660,6 +3664,115 @@ lotRow=function(l){
 ACT['lot-unload']=a=>{const l=lotOf(a.dataset.id);if(!l||!l.scarico||l.scaricoAnn)return;
   l.scarico.forEach(d=>{const p=S.products.find(y=>y.id===d.pid);if(p)p.qty=qN((+p.qty||0)+d.conf)});
   l.scaricoAnn=true;save();rerender();setTimeout(()=>{const d=document.getElementById('d-l-'+l.id);if(d)d.open=true},40);toast('Scarico annullato: quantità rimesse in magazzino')};
+
+/* ---------- abbonamento con Stripe (solo online) ----------
+   Ogni azienda cliente paga LabService dall'app. LabService decide nell'Area LabService:
+   pagamento "stripe" (il cliente paga con carta) o "esente" (gestito da LabService fuori dall'app),
+   piano mensile o annuale e prezzo. Il cliente attiva l'abbonamento con 7 giorni di prova (carta subito,
+   addebito automatico dopo la prova). Se un pagamento non riesce: avviso e 3 giorni di tolleranza, poi blocco.
+   I dati della carta restano su Stripe: l'app vede solo lo stato. Server: funzione "pagamenti". */
+const eur=c=>(Math.round(c||0)/100).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+const perTxt=p=>p==='annuale'?'all\'anno':'al mese';
+const dIso=t=>t?String(t).slice(0,10):'';
+const gratiaFine=a=>a&&a.insoluto_dal?new Date(Date.parse(a.insoluto_dal)+3*864e5).toISOString().slice(0,10):'';
+async function payCall(azione,body={}){
+  const {data}=await C.sb.auth.getSession();const s=data&&data.session;
+  let r;try{r=await fetch(SUPA.url+'/functions/v1/pagamenti',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+(s?s.access_token:''),apikey:SUPA.key},body:J({azione,...body})})}
+  catch(e){throw new Error('Connessione non riuscita: riprova')}
+  const j=await r.json().catch(()=>null);
+  if(!r.ok||!j||j.error)throw new Error((j&&j.error)||('Errore '+r.status));
+  return j;
+}
+const payBack=()=>location.origin+location.pathname;
+/* all'ingresso: se l'abbonamento non permette di lavorare, rilegge lo stato da Stripe (es. appena tornati
+   dal pagamento) e, se serve, mostra la schermata di attivazione. Ritorna false se l'app va bloccata. */
+async function payGate(ctx){
+  const qs=new URLSearchParams(location.search),esito=qs.get('pagamento');
+  if(esito){try{history.replaceState(null,'',location.pathname+location.hash)}catch(e){}}
+  const a=ctx.azienda;
+  if((!ctx.abbonamento_ok||esito==='ok')&&a.pagamento==='stripe'){
+    try{const r=await payCall('stato');if(r&&r.abbonamento){Object.assign(a,r.abbonamento);ctx.abbonamento_ok=r.abbonamento.ok}}catch(e){}
+  }
+  if(esito==='ok'&&ctx.abbonamento_ok)setTimeout(()=>toast(a.sub_stato==='trialing'?`Abbonamento attivato: prova gratuita fino al ${fmt(dIso(a.prova_fine))}`:'Pagamento registrato: grazie!'),300);
+  if(ctx.abbonamento_ok===false){C.block='pagamento';route();return false}
+  return true;
+}
+function payHTML(){
+  const a=(C.ctx&&C.ctx.azienda)||{},nome=esc(a.nome||'la tua azienda');
+  const head=`<main class="login pad stack"><div class="logo" role="img" aria-label="LabService srls"><b>Lab</b>Service <small>srls</small></div><div class="card stack">`;
+  const foot=`<p class="hint">Pagamento sicuro con Stripe: i dati della carta non passano dall'app né da LabService.</p></div><button class="btn sec" data-act="logout">Esci</button></main>`;
+  const prezzo=a.prezzo_cent?`<div class="card stack" style="gap:4px;background:var(--brand-soft);border-color:var(--brand)"><span class="lbl">Il tuo piano</span><strong style="font-size:1.25em">${eur(a.prezzo_cent)} ${perTxt(a.piano)}</strong><span class="r-sub">Abbonamento ${a.piano==='annuale'?'annuale':'mensile'} · IVA inclusa · disdici quando vuoi</span></div>`:'';
+  if(!a.prezzo_cent||!a.piano)return head+`<strong>Abbonamento da impostare</strong><p>LabService non ha ancora impostato il piano di <b>${nome}</b>. Contattali per attivare l'accesso.</p>`+foot;
+  if(['past_due','unpaid'].includes(a.sub_stato))return head+`<strong>Pagamento non riuscito</strong><p>L'ultimo addebito per <b>${nome}</b> non è andato a buon fine e i 3 giorni di tolleranza sono passati. Aggiorna la carta per tornare a lavorare: i tuoi dati sono al sicuro.</p>${prezzo}<button class="btn" data-act="pay-portal">Aggiorna il metodo di pagamento</button><button class="btn ghost" data-act="pay-recheck">Ho già pagato: ricontrolla</button>`+foot;
+  if(a.prova_usata||a.sub_stato)return head+`<strong>Abbonamento terminato</strong><p>L'abbonamento di <b>${nome}</b> non è attivo. Riattivalo per continuare a registrare: i dati salvati sono tutti lì.</p>${prezzo}<button class="btn" data-act="pay-checkout">Riattiva l'abbonamento</button><button class="btn ghost" data-act="pay-recheck">Ho già pagato: ricontrolla</button>`+foot;
+  return head+`<strong>Attiva HACCP Salus</strong><p>Benvenuto! Per iniziare a usare l'app con <b>${nome}</b> attiva l'abbonamento.</p>${prezzo}
+    <ul class="stack" style="gap:4px;padding-left:18px;margin:0"><li><b>7 giorni gratis.</b> Inserisci la carta ora: il primo addebito parte il <b>${fmt(addDays(7))}</b>.</li><li>Se disdici prima, non paghi nulla.</li><li>Ricevute e fatture le trovi nel tuo profilo.</li></ul>
+    <button class="btn" data-act="pay-checkout">Inizia la prova gratuita</button>`+foot;
+}
+{const _bh=blockHTML;blockHTML=function(){return C.block==='pagamento'?payHTML():_bh()}}
+/* scheda Abbonamento nel profilo */
+const _subCardEsente=subCard;
+subCard=function(){
+  const a=(C.ctx&&C.ctx.azienda)||{};
+  if(a.pagamento!=='stripe')return _subCardEsente();
+  const st=a.sub_stato,t=st==='trialing'?tag('info','In prova'):st==='active'?tag('ok','Attivo'):['past_due','unpaid'].includes(st)?tag('bad','Pagamento non riuscito'):tag('warn','Non attivo');
+  const next=st==='trialing'?kv('Primo addebito:',fmt(dIso(a.prova_fine))):st==='active'?kv('Prossimo rinnovo:',fmt(dIso(a.sub_fine_periodo))):['past_due','unpaid'].includes(st)?kv('Aggiorna la carta entro:',fmt(gratiaFine(a))):'';
+  return `<div class="card stack"><div class="h-row"><strong>Abbonamento</strong>${t}</div>
+    ${a.prezzo_cent?kv('Piano:',`${a.piano==='annuale'?'Annuale':'Mensile'} · ${eur(a.prezzo_cent)} ${perTxt(a.piano)}`):''}${next}
+    <p class="muted">Carta, ricevute, fatture e disdetta si gestiscono sulla pagina sicura di Stripe.</p>
+    ${a.stripe_customer||a.cliente?`<div><button class="btn sm" data-act="pay-portal">${ic('file',16)} Gestisci pagamento e fatture</button></div>`:''}</div>`;
+};
+/* in Home: avviso durante i 3 giorni di tolleranza */
+{const _vh=V.home.r;V.home.r=()=>{const h=_vh();const a=C.ctx&&C.ctx.azienda;
+  if(!CLOUD||!a||a.pagamento!=='stripe'||!['past_due','unpaid'].includes(a.sub_stato))return h;
+  return `<div class="pad" style="padding-bottom:0"><div class="card stack" style="border-color:var(--bad)"><strong style="color:var(--bad)">Pagamento non riuscito</strong><p>L'ultimo addebito dell'abbonamento non è andato a buon fine. Aggiorna la carta entro il <b>${fmt(gratiaFine(a))}</b>, poi l'accesso si blocca.</p><div><button class="btn sm" data-act="pay-portal">Aggiorna il metodo di pagamento</button></div></div></div>`+h}}
+/* Area LabService: stato del pagamento di ogni azienda */
+function admSubLine(a){
+  if(a.demo)return '';
+  if(a.pagamento!=='stripe')return `<p class="r-sub">${tag('info','Pagamento gestito da LabService')}</p>`;
+  const p=a.prezzo_cent?`${eur(a.prezzo_cent)} ${perTxt(a.piano)}`:'prezzo da impostare';
+  const st=a.sub_stato;
+  const t=!st?tag('warn','Da attivare dal cliente'):st==='trialing'?tag('info','In prova fino al '+fmt(dIso(a.prova_fine))):st==='active'?tag('ok','Pagante'):['past_due','unpaid'].includes(st)?tag('bad','Pagamento non riuscito'):st==='canceled'?tag('bad','Disdetto'):tag('warn',esc(st));
+  return `<p class="r-sub" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${t}<span>Stripe · ${p}</span></p>`;
+}
+function admPayFields(a){
+  a=a||{};const pg=a.id?(a.pagamento||'esente'):'stripe';
+  return `<fieldset class="fs stack"><legend>Abbonamento</legend>
+    <label class="cbox"><input type="radio" name="pagamento" value="stripe"${pg==='stripe'?' checked':''}><span>Il cliente paga con carta dall'app (Stripe)</span></label>
+    <label class="cbox"><input type="radio" name="pagamento" value="esente"${pg==='esente'?' checked':''}><span>Pagamento gestito da LabService (nessun pagamento nell'app)</span></label>
+    <div class="grid2">${fld('az-pi','Piano',sel('az-pi','piano',[['mensile','Mensile'],['annuale','Annuale']],a.piano||'mensile'))}${fld('az-pz','Prezzo (€, IVA inclusa)',inp('az-pz','prezzo',a.prezzo_cent?String(a.prezzo_cent/100).replace('.',','):'','inputmode="decimal" placeholder="es. 29,00" autocomplete="off"'))}</div>
+    <p class="hint">Primo abbonamento: 7 giorni gratis con la carta inserita subito, poi l'addebito parte da solo. Se cambi il prezzo vale dal prossimo rinnovo; se passi da mensile ad annuale (o viceversa) il nuovo periodo parte subito.</p></fieldset>`;
+}
+{const _f=admAzForm;admAzForm=function(a){_f(a);const f=$('#sheet form[data-form="adm-az"]');if(!f)return;const b=f.querySelector('.errmsg')||f.querySelector('button[type=submit]');b.insertAdjacentHTML('beforebegin',admPayFields(a))}}
+{const _s=FORMS['adm-az'];FORMS['adm-az']=async f=>{
+  const pg=(f.querySelector('input[name=pagamento]:checked')||{}).value||'esente';
+  const prezzo=val(f,'prezzo').replace(',','.'),piano=val(f,'piano');
+  if(pg==='stripe'&&!(+prezzo>=1))return ferr(f,'Con il pagamento dall\'app indica il prezzo (almeno 1 €).',['prezzo']);
+  const id=val(f,'id'),old=id?admAz(id):null;
+  /* il form originale invia i dati anagrafici: qui aggiungo l'abbonamento alla stessa chiamata */
+  const _call=admCall;admCall=(az,body={})=>_call(az,(az==='crea_azienda'||az==='modifica_azienda')?{...body,pagamento:pg,piano,prezzo}:body);
+  try{await _s(f)}finally{admCall=_call}
+  if(old&&pg==='stripe'&&(old.piano!==piano||Math.round(+prezzo*100)!==old.prezzo_cent)){   /* se c'è già un abbonamento Stripe, la funzione lo aggiorna */
+    try{const r=await payCall('applica_prezzo',{azienda_id:id});if(r.applicato)toast('Nuovo prezzo applicato anche all\'abbonamento Stripe')}catch(e){toast('Prezzo salvato, ma Stripe non è stato aggiornato: '+e.message)}
+  }
+}}
+/* Area LabService: verifica del collegamento con Stripe */
+{const _va=vAdmin;vAdmin=function(){let h=_va();if(!ui.adm)return h;
+  const card=`<div class="card stack"><div class="h-row"><strong>Pagamenti Stripe</strong><span id="pay-setup">${ui.paySetup||''}</span></div><p class="muted">Abbonamenti dei clienti con carta. Prezzo e piano si impostano in "Modifica dati" di ogni azienda.</p><div><button class="btn sm sec" data-act="pay-setup">Verifica collegamento</button></div></div>`;
+  return h.replace('<div class="field"><label for="adm-q">',card+'<div class="field"><label for="adm-q">')};if(V.admin)V.admin.r=vAdmin}
+Object.assign(ACT,{
+  'pay-checkout':async a=>{a.disabled=true;const t=a.textContent;a.textContent='Apro la pagina di pagamento…';
+    try{const r=await payCall('checkout',{ritorno:payBack()});location.href=r.url}catch(e){a.disabled=false;a.textContent=t;toast(e.message)}},
+  'pay-portal':async a=>{if(a){a.disabled=true}
+    try{const r=await payCall('portale',{ritorno:payBack()});location.href=r.url}catch(e){if(a)a.disabled=false;toast(e.message)}},
+  'pay-recheck':()=>location.reload(),
+  'pay-setup':async a=>{a.disabled=true;
+    try{const r=await payCall('setup');
+      ui.paySetup=r.configurato?tag(r.modalita==='live'?'ok':'warn',r.modalita==='live'?'Collegato · pagamenti reali':'Collegato · modalità di prova'):tag('bad','Chiave mancante');
+      toast(r.configurato?`Stripe collegato: ${r.account} (${r.modalita==='live'?'pagamenti reali':'modalità di prova'})`:r.messaggio)}
+    catch(e){ui.paySetup=tag('bad','Errore');toast(e.message)}
+    a.disabled=false;const el=$('#pay-setup');if(el)el.innerHTML=ui.paySetup}
+});
 
 /* ---------- events ---------- */
 document.addEventListener('click',e=>{

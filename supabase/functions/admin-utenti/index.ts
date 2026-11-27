@@ -31,8 +31,33 @@ function genPassword() {
 
 const AZ_FIELDS = ["nome", "piva", "indirizzo", "referente", "settore", "telefono", "pec", "note"] as const;
 function aziendaDa(b: Record<string, unknown>) {
-  const o: Record<string, string | null> = {};
+  const o: Record<string, string | number | null> = {};
   for (const k of AZ_FIELDS) if (k in b) o[k] = txt(b[k], k === "note" ? 1000 : 200);
+  return o;
+}
+// Abbonamento deciso da LabService per ogni azienda:
+// pagamento "stripe" (il cliente paga dall'app) o "esente" (gestito da LabService fuori dall'app),
+// piano "mensile" o "annuale", prezzo in euro (il totale che il cliente paga).
+function abbonamentoDa(b: Record<string, unknown>): Record<string, unknown> | string {
+  const o: Record<string, unknown> = {};
+  if ("pagamento" in b) {
+    if (!["stripe", "esente"].includes(String(b.pagamento))) return "Modalità di pagamento non valida";
+    o.pagamento = b.pagamento;
+  }
+  if ("piano" in b) {
+    if (b.piano && !["mensile", "annuale"].includes(String(b.piano))) return "Piano non valido";
+    o.piano = b.piano || null;
+  }
+  if ("prezzo" in b) {
+    const raw = String(b.prezzo ?? "").replace(",", ".").trim();
+    if (!raw) o.prezzo_cent = null;
+    else {
+      const e = Number(raw);
+      if (!Number.isFinite(e) || e < 1 || e > 100000) return "Prezzo non valido (da 1 a 100.000 €)";
+      o.prezzo_cent = Math.round(e * 100);
+    }
+  }
+  if (o.pagamento === "stripe" && (!("piano" in o) || !o.piano || !o.prezzo_cent)) return "Con il pagamento dall'app servono piano e prezzo";
   return o;
 }
 
@@ -79,7 +104,9 @@ Deno.serve(async (req) => {
       case "crea_azienda": {
         const a = aziendaDa(b);
         if (!a.nome) return json({ error: "Manca la ragione sociale" }, 400);
-        const { data, error } = await sb.from("aziende").insert(a).select().single();
+        const ab = abbonamentoDa(b);
+        if (typeof ab === "string") return json({ error: ab }, 400);
+        const { data, error } = await sb.from("aziende").insert({ ...a, ...ab }).select().single();
         if (error) throw error;
         return json({ azienda: data });
       }
@@ -87,7 +114,9 @@ Deno.serve(async (req) => {
       case "modifica_azienda": {
         const id = txt(b.id, 40);
         if (!id) return json({ error: "Azienda mancante" }, 400);
-        const a: Record<string, unknown> = aziendaDa(b);
+        const ab = abbonamentoDa(b);
+        if (typeof ab === "string") return json({ error: ab }, 400);
+        const a: Record<string, unknown> = { ...aziendaDa(b), ...ab };
         if (typeof b.attivo === "boolean") a.attivo = b.attivo;
         if ("nome" in a && !a.nome) return json({ error: "La ragione sociale non può essere vuota" }, 400);
         const { data, error } = await sb.from("aziende").update(a).eq("id", id).select().single();
