@@ -459,6 +459,7 @@ input.file{height:auto;padding:10px;font-size:14px}
   - audit con la checklist OSA ....... 20 domande fisse (Regione Campania), esiti C/NCm/NCM/NA, verbale PDF
   - piano di campionatura ............ voci libere con rapporti di prova (Documentazione, scheda Campionatura)
   - rintracciabilità di un lotto ...... dal lotto della materia prima a lotti di produzione e clienti (DDT), rapporto PDF
+  - scarico del magazzino da ricetta .. Crea lotto con ricetta: ingredienti × quantità prodotta, scalati dal magazzino
   - events ............................ ascoltatori globali e avvio dell'app
 
   MODELLO DATI (oggetto S, versione v:3)
@@ -469,7 +470,8 @@ input.file{height:auto;padding:10px;font-size:14px}
   fornitori[], products[]           fornitori e magazzino (lotto, scadenza, confezioni, allergeni, ean)
   fatture[]                         controllo merci in ingresso (status 'pending'|'ok'|'nc')
   nonconf[]                         merce non conforme e azioni correttive
-  lotti[]                           lotti di produzione (items = materie prime con il lotto del fornitore)
+  lotti[]                           lotti di produzione (items = materie prime con il lotto del fornitore;
+                                    scarico[] = ingredienti scalati dal magazzino, mult = volte la ricetta)
   clienti[], uscite[]               clienti e DDT in uscita (righe = lotti venduti)
   ricette[], menus[], team[]        ricette con allergeni, menu, personale con attestati
   extra{abb,scong,liev,ghiaccio}    schede extra: abbattimento, scongelamento, lievitazione, ghiaccio
@@ -942,7 +944,7 @@ function vTrac(){
 }
 function prodRow(p){
   return drow('p-'+p.id,`${p.name} ${p.marca} ${p.lotto} ${p.sci||''} ${p.fatt||''}`,
-    `<span class="r-title">${esc(p.name)}</span><span class="r-sub">${esc(p.marca)}</span><span class="meta"><span>Lotto: <b class="mono">${esc(p.lotto)}</b></span><span>Kg: ${String(p.kg).replace('.',',')} · Qu: ${p.qty}</span></span>`,
+    `<span class="r-title">${esc(p.name)}</span><span class="r-sub">${esc(p.marca)}</span><span class="meta"><span>Lotto: <b class="mono">${esc(p.lotto)}</b></span><span>Kg: ${String(p.kg).replace('.',',')} · Qu: ${qTxt(p.qty)}${Number.isInteger(+p.qty)?'':` (${kgTxt(p.qty*p.kg)})`}</span></span>`,
     expTag(p),
     `${kv('Scadenza',`${fmt(p.scad)} (${daysTo(p.scad)<0?'scaduto':dueTxt(daysTo(p.scad))})`)}${p.lotAuto?kv('Lotto',`${esc(p.lotto)} <span class="muted">(data di ricevimento, lotto assente)</span>`):''}${kv('Fornitore',esc(fname(p.forn)))}${p.fatt?kv('Fattura',`N° <span class="mono">${esc(p.fatt)}</span>`):''}${kv('Soglia minima',`${p.min} confezioni`)}${p.sci?kv('Nome scientifico',`<i>${esc(p.sci)}</i>`):''}${p.zona?kv('Zona di pesca',esc(p.zona)):''}
      <div class="stack" style="gap:6px"><span class="lbl">Allergeni</span>${chipsOf(p.allerg)}</div>
@@ -954,8 +956,8 @@ function vMag(){
 }
 function vScorte(){
   const ps=S.products.filter(p=>p.qty<p.min).sort((a,b)=>a.qty-b.qty);
-  const rows=ps.map(p=>drow('sc-'+p.id,`${p.name} ${fname(p.forn)}`,`<span class="r-title">${esc(p.name)}</span><span class="r-sub">${esc(fname(p.forn))}</span><span class="meta"><span>Disponibili: <b>${p.qty}</b></span><span>Soglia: ${p.min}</span></span>`,tag(p.qty===0?'bad':'warn',p.qty===0?'Esaurito':'Sotto scorta'),
-    `${kv('Da ordinare',`${Math.max(p.min*2-p.qty,1)} confezioni da ${String(p.kg).replace('.',',')} kg`)}${kv('Contatto',`<span class="sel-text">${esc((S.fornitori.find(f=>f.id===p.forn)||{}).tel||'—')}</span>`)}`)).join('');
+  const rows=ps.map(p=>drow('sc-'+p.id,`${p.name} ${fname(p.forn)}`,`<span class="r-title">${esc(p.name)}</span><span class="r-sub">${esc(fname(p.forn))}</span><span class="meta"><span>Disponibili: <b>${qTxt(p.qty)}</b></span><span>Soglia: ${p.min}</span></span>`,tag(p.qty===0?'bad':'warn',p.qty===0?'Esaurito':'Sotto scorta'),
+    `${kv('Da ordinare',`${Math.max(Math.ceil(p.min*2-p.qty),1)} confezioni da ${String(p.kg).replace('.',',')} kg`)}${kv('Contatto',`<span class="sel-text">${esc((S.fornitori.find(f=>f.id===p.forn)||{}).tel||'—')}</span>`)}`)).join('');
   return `<div class="pad blk"><p class="muted">Prodotti con meno confezioni della soglia minima impostata in magazzino. Con una soglia di 2, il prodotto compare qui quando ne resta 1.</p></div>${tools('Cerca un prodotto…','sc-list')}${listWrap('sc-list',rows,'Nessun prodotto sotto scorta.')}`;
 }
 function fattRow(f){
@@ -3593,6 +3595,71 @@ Object.assign(ACT,{
   trace:a=>traceSheet(a.dataset.q||''),
   'trace-pdf':()=>{const r=traceRun(ui.traceQ);if(r)makeFile('pdf',()=>tracePDF(r),`rintracciabilita-${slug(r.q)}.pdf`)}
 });
+
+/* ---------- scarico del magazzino da ricetta (Crea lotto) ----------
+   Con una ricetta (grammi per una ricetta) e la quantità prodotta (es. "8 pezzi" = 8 volte la
+   ricetta), ogni ingrediente viene moltiplicato e scalato dal magazzino. Il magazzino conta le
+   confezioni (p.qty) da p.kg kg ciascuna: lo scarico toglie kg/p.kg confezioni, anche frazionarie
+   (es. 2,4 confezioni). Lo scarico resta scritto nel lotto (l.scarico[]) e si può annullare. */
+const qN=v=>Math.round(v*10000)/10000;   /* confezioni salvate con 4 decimali (precisione di grammi anche sui sacchi da 25 kg) */
+const qTxt=v=>String(Math.round((+v||0)*100)/100).replace('.',',');
+const kgTxt=v=>String(Math.round((+v||0)*100)/100).replace('.',',')+' kg';
+const gTxt=g=>g>=1000?`${String(qN(g/1000)).replace('.',',')} kg`:`${qN(g)} g`;
+function lotMult(qty){const n=num(String(qty||'').replace(/^[^\d]*/,''));return n&&n>0?n:null}
+function scaricoPlan(r,mult,selIds){
+  if(!r||!mult)return [];
+  const sel=[...selIds].map(id=>S.products.find(p=>p.id===id)).filter(Boolean);
+  return r.ingr.map(([n,g])=>{const k=String(n).toLowerCase();
+    const p=sel.find(x=>x.name.toLowerCase()===k)||sel.find(x=>x.name.toLowerCase().startsWith(k)||k.startsWith(x.name.toLowerCase()));
+    const tot=(+g||0)*mult;
+    if(!p)return {name:n,g:+g||0,tot,miss:true};
+    const kg=+p.kg||0;if(!kg)return {name:n,g:+g||0,tot,p,nokg:true};
+    const conf=tot/1000/kg;return {name:n,g:+g||0,tot,p,conf,after:qN((+p.qty||0)-conf)};
+  });
+}
+function scaricoHTML(){
+  const r=S.ricette.find(x=>x.id===ui.lotRic);if(!r)return '';
+  const q=$('#lf-q'),mult=lotMult(q?q.value:'');
+  if(!mult)return `<p class="hint">Scrivi la quantità prodotta: gli ingredienti della ricetta ${esc(r.name)} vengono moltiplicati per quel numero e scalati dal magazzino.</p>`;
+  const plan=scaricoPlan(r,mult,ui.sel);
+  return `<span class="lbl">Ingredienti × ${qTxt(mult)}</span><div class="ilist">${plan.map(x=>`<div class="ili"><span><strong>${esc(x.name)}</strong><br><span class="r-sub">${gTxt(x.g)} × ${qTxt(mult)} = <b>${gTxt(x.tot)}</b></span></span><span class="r-sub" style="text-align:right">${x.miss?tag('warn','Non in magazzino'):x.nokg?tag('warn','Peso confezione mancante'):`−${qTxt(x.conf)} conf. da ${qTxt(x.p.kg)} kg<br>restano ${x.after<0?`<b style="color:var(--bad)">${qTxt(x.after)}</b>`:`${qTxt(x.after)} (${kgTxt(x.after*x.p.kg)})`}`}</span></div>`).join('')}</div>${plan.some(x=>x.after<0)?`<p class="hint" style="color:var(--bad)">In magazzino non c'è abbastanza: lo scarico porta a zero e conviene controllare le quantità.</p>`:''}`;
+}
+const _lotForm=lotForm;
+lotForm=function(){
+  _lotForm();
+  const r=S.ricette.find(x=>x.id===ui.lotRic);if(!r)return;
+  const q=$('#lf-q');if(!q)return;
+  q.placeholder='es. 8 (= 8 volte la ricetta)';
+  const fl=q.closest('.field');
+  fl.insertAdjacentHTML('afterend',`<label class="cbox"><input type="checkbox" name="scarico" checked><span>Scala gli ingredienti dal magazzino</span></label><div id="lf-sc" class="stack" style="gap:6px">${scaricoHTML()}</div>`);
+};
+document.addEventListener('input',e=>{if(e.target.id==='lf-q'){const d=$('#lf-sc');if(d)d.innerHTML=scaricoHTML()}});
+document.addEventListener('change',e=>{if(e.target.name==='scarico'){const d=$('#lf-sc');if(d)d.hidden=!e.target.checked}});
+const _lotSubmit=FORMS.lot;
+FORMS.lot=f=>{
+  const r=S.ricette.find(x=>x.id===ui.lotRic),doIt=!!(f.elements.scarico&&f.elements.scarico.checked);
+  const plan=r&&doIt?scaricoPlan(r,lotMult(val(f,'qty')),ui.sel):[];
+  const n0=S.lotti.length;_lotSubmit(f);
+  if(S.lotti.length===n0||!plan.length)return;
+  const l=S.lotti[S.lotti.length-1];const done=[];
+  plan.filter(x=>x.p&&x.conf).forEach(x=>{const p=S.products.find(y=>y.id===x.p.id);if(!p)return;const tolto=Math.min(+p.qty||0,x.conf);p.qty=qN((+p.qty||0)-tolto);done.push({pid:p.id,name:p.name,lotto:p.lotto,g:x.tot,conf:qN(tolto),manca:qN(x.conf-tolto)})});
+  if(!done.length)return;
+  l.scarico=done;l.mult=lotMult(l.qty);save();rerender();
+  setTimeout(()=>{const d=document.getElementById('d-l-'+l.id);if(d)d.open=true},40);
+  const short=done.filter(d=>d.manca>0);
+  toast(`Lotto ${l.code} creato · scalati ${done.length} ingredient${done.length===1?'e':'i'} dal magazzino${short.length?` (${short.length} non bastavano)`:''}`);
+};
+/* nel dettaglio del lotto: cosa è stato scalato, con annullamento */
+const _lotRow=lotRow;
+lotRow=function(l){
+  let h=_lotRow(l);if(!l.scarico||!l.scarico.length)return h;
+  const box=`<div class="stack" style="gap:6px"><span class="lbl">Scaricato dal magazzino${l.mult?` (ricetta × ${qTxt(l.mult)})`:''}${l.scaricoAnn?' · annullato':''}</span><div class="ilist">${l.scarico.map(d=>`<div class="ili"><span>${esc(d.name)} <span class="r-sub mono">${esc(d.lotto||'')}</span></span><span>${gTxt(d.g)} · −${qTxt(d.conf)} conf.${d.manca>0?` <span style="color:var(--bad)">(mancavano ${qTxt(d.manca)})</span>`:''}</span></div>`).join('')}</div></div>`;
+  const undo=l.scaricoAnn?'':`<button class="btn sm ghost" data-act="lot-unload" data-id="${l.id}">${ic('refresh',16)} Annulla scarico</button>`;
+  return h.replace('<div class="actions">',box+'<div class="actions">'+undo);
+};
+ACT['lot-unload']=a=>{const l=lotOf(a.dataset.id);if(!l||!l.scarico||l.scaricoAnn)return;
+  l.scarico.forEach(d=>{const p=S.products.find(y=>y.id===d.pid);if(p)p.qty=qN((+p.qty||0)+d.conf)});
+  l.scaricoAnn=true;save();rerender();setTimeout(()=>{const d=document.getElementById('d-l-'+l.id);if(d)d.open=true},40);toast('Scarico annullato: quantità rimesse in magazzino')};
 
 /* ---------- events ---------- */
 document.addEventListener('click',e=>{
