@@ -469,6 +469,7 @@ input.file{height:auto;padding:10px;font-size:14px}
   extra{abb,scong,liev,ghiaccio}    schede extra: abbattimento, scongelamento, lievitazione, ghiaccio
   reports[], docs[], audits[]       ispezioni, documentazione HACCP, audit (v:2 = checklist OSA, risposte in ans)
   docUp{files[]}                    documenti caricati dal cliente nella sezione Documentazione
+  campionatura[]                    piano di campionatura {voce, freq, desc, files[]} (sezione Documentazione)
   pest{ditta,checks[]}, manut{int[]} infestanti e manutenzioni
   retention                         anni di conservazione di lotti e DDT (cancellazione automatica)
   Le foto sono stringhe "data:image/...". Online vengono salvate nel deposito file e nei
@@ -1201,7 +1202,7 @@ function vAudit(){
 function vDocumenti(){
   const rows=S.docs.map(d=>drow('dc-'+d.id,d.title,`<span class="r-title">${esc(d.title)}</span><span class="r-sub">${esc(d.rev)} · ${fmt(d.date)}</span>`,tag('info',`${d.alleg} allegat${d.alleg===1?'o':'i'}`),
     `<p>${esc(d.text.split('\n')[0])}</p><div class="actions"><button class="btn sm" data-act="doc-open" data-id="${d.id}">${ic('file',16)} Apri documento</button></div>`)).join('');
-  return `<div class="pad stack blk"><div class="card stack"><strong>Documenti dell'azienda</strong><p class="hint">Carica qui i documenti dell'attività: SCIA/NIA, planimetria, contratti, analisi di laboratorio, certificati, schede tecniche. Restano salvati online e li vede tutto il personale dell'azienda.</p>${filesBlock('cli:docs','Documenti caricati','Carica documento')}</div></div>${sec('Manuale e procedure HACCP')}${tools('Cerca un documento…','dc-list')}${listWrap('dc-list',rows,'Nessun documento.')}`;
+  return `<div class="pad stack blk"><div class="card stack"><strong>Documenti dell'azienda</strong><p class="hint">Carica qui i documenti dell'attività: SCIA/NIA, planimetria, contratti, analisi di laboratorio, certificati, schede tecniche. Restano salvati online e li vede tutto il personale dell'azienda.</p>${filesBlock('cli:docs','Documenti caricati','Carica documento')}</div></div>${sec('Manuale e procedure HACCP')}${tools('Cerca un documento…','dc-list')}${listWrap('dc-list',rows,'Nessun documento.')}${campBlock()}`;
 }
 function vInfestanti(){
   const cs=[...S.pest.checks].sort((a,b)=>b.date.localeCompare(a.date));
@@ -2130,6 +2131,7 @@ function fileHost(t){
   if(k==='ditta')return S.pest.ditta;
   if(k==='attr')return S.attrezzature.find(x=>x.id===id);
   if(k==='cli'){if(!S.docUp)S.docUp={files:[]};return S.docUp}
+  if(k==='camp')return (S.campionatura||[]).find(x=>x.id===id);
   return null;
 }
 async function storeFiles(list){
@@ -3435,6 +3437,51 @@ Object.assign(ACT,{
   'audit-fresh':()=>{draftSet(null);auditForm(true)},
   'audit-view':a=>auditView(a.dataset.id),
   'audit-pdf':a=>{const x=S.audits.find(y=>y.id===a.dataset.id);if(x)makeFile('pdf',()=>auditPDF(x),`audit-${x.date}-${slug(x.rs||'osa')}.pdf`)}
+});
+
+/* ---------- piano di campionatura (Documentazione) ----------
+   Voci libere come le aree della sanificazione: cosa si campiona, frequenza e una descrizione
+   scritta a piacere (analisi, punti di prelievo, laboratorio, limiti). A ogni voce si possono
+   allegare i rapporti di prova. Dati in S.campionatura[] = {id, voce, freq, desc, files[], date, by}. */
+const CAMP_QUICK=['Tamponi superfici','Acqua potabile','Prodotti finiti','Materie prime','Shelf-life','Allergeni'];
+function campBlock(){
+  const L=S.campionatura||[];
+  const rows=L.map(c=>`<button type="button" class="row flat pad rbtn" data-act="camp-open" data-id="${c.id}"><span class="rh"><span class="r-title">${esc(c.voce)}</span><span class="r-sub">${c.freq?esc(c.freq)+' · ':''}${c.desc?esc(c.desc.split('\n')[0].slice(0,80)):'Nessuna descrizione'}</span></span>${(c.files||[]).length?tag('info',`${c.files.length} allegat${c.files.length===1?'o':'i'}`):''}</button>`).join('');
+  return `${sec('Piano di campionatura')}<div class="pad" style="padding-top:0"><p class="hint">Cosa si campiona, con che frequenza e come. Scrivi liberamente e aggiungi tutte le voci che servono; a ogni voce puoi allegare i rapporti di prova del laboratorio.</p></div>
+  ${rows?`<div class="list">${rows}</div>`:'<p class="empty pad">Nessuna voce nel piano di campionatura.</p>'}
+  <div class="pad"><button class="btn ghost" data-act="camp-new">${ic('plus',16)} Aggiungi voce</button></div>`;
+}
+function campForm(id){
+  const c=id?(S.campionatura||[]).find(x=>x.id===id):null;if(id&&!c)return;
+  openSheet(c?'Modifica voce':'Piano di campionatura',`${c?'':`<div class="stack"><span class="lbl">Aggiungi con un tocco</span><div class="chips">${CAMP_QUICK.map(n=>`<button type="button" class="chipadd" data-act="camp-quick" data-name="${n}">+ ${n}</button>`).join('')}</div></div>`}
+  <form data-form="camp" data-id="${c?c.id:''}" class="stack" novalidate>
+    ${fld('cp-v',c?'Voce':'Oppure scrivi tu',inp('cp-v','voce',c?c.voce:'','autocomplete="off" placeholder="es. Tampone piani di lavoro laboratorio"'))}
+    ${fld('cp-f','Frequenza',inp('cp-f','freq',c?c.freq:'','autocomplete="off" placeholder="es. ogni 6 mesi"'),'Facoltativo')}
+    ${fld('cp-d','Descrizione',area('cp-d','desc',c?c.desc:'','Analisi e parametri, punti di prelievo, laboratorio, limiti, note…'),'Scrivi quello che serve, anche su più righe')}
+    ${errP}<button class="btn block" type="submit">${c?'Salva':'Aggiungi'}</button></form>`);
+}
+function campSheet(id){
+  const c=(S.campionatura||[]).find(x=>x.id===id);if(!c){closeSheet(true);return}
+  openSheet(c.voce,`<div class="stack">${c.freq?kv('Frequenza:',esc(c.freq)):''}
+    ${c.desc?`<p style="white-space:pre-line">${esc(c.desc)}</p>`:'<p class="hint">Nessuna descrizione.</p>'}
+    <p class="hint">Ultima modifica ${fmt(c.date)}${c.by?' · '+esc(c.by):''}</p>
+    ${filesBlock('camp:'+c.id,'Rapporti di prova','Carica rapporto')}
+    <div class="actions"><button class="btn sm" data-act="camp-edit" data-id="${c.id}">${ic('pen',16)} Modifica</button><button class="btn sm dng" data-act="ask-del" data-kind="campionatura" data-id="${c.id}" data-label="la voce “${esc(c.voce)}”">${ic('trash',16)} Elimina</button></div></div>`);
+  ui.sheetRefresh=()=>campSheet(id);
+}
+FORMS.camp=f=>{
+  const v=val(f,'voce');if(!v)return ferr(f,'Scrivi cosa si campiona.',['voce']);
+  if(!S.campionatura)S.campionatura=[];
+  const id=f.dataset.id;let c=id&&S.campionatura.find(x=>x.id===id);
+  if(c)Object.assign(c,{voce:v,freq:val(f,'freq'),desc:(f.elements.desc.value||'').trim(),date:TISO,by:me()?me().name:''});
+  else{c={id:'cp'+uid(),voce:v,freq:val(f,'freq'),desc:(f.elements.desc.value||'').trim(),files:[],date:TISO,by:me()?me().name:''};S.campionatura.push(c)}
+  save();rerender();campSheet(c.id);toast(id?'Voce salvata':`${v} aggiunto al piano di campionatura`);
+};
+Object.assign(ACT,{
+  'camp-new':()=>campForm(null),
+  'camp-edit':a=>campForm(a.dataset.id),
+  'camp-open':a=>campSheet(a.dataset.id),
+  'camp-quick':a=>{const i=$('#cp-v');if(i){i.value=a.dataset.name;i.focus()}}
 });
 
 /* ---------- events ---------- */
