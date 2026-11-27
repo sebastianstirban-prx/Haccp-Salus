@@ -11,8 +11,12 @@ Realizzata da Proxima Studio.
 
 ```
 .
-├── web/
-│   └── index.html                  L'app completa (HTML + CSS + JavaScript in un solo file, senza build)
+├── web/                            La cartella da pubblicare su Netlify, così com'è
+│   ├── index.html                  L'app completa (HTML + CSS + JavaScript in un solo file, senza build)
+│   ├── manifest.webmanifest        Nome e icone quando l'app si aggiunge alla schermata Home (Android)
+│   ├── apple-touch-icon.png        Icona per "Aggiungi a Home" su iPhone e iPad (180×180, fondo bianco)
+│   ├── icon-192.png, icon-512.png  Icone Android; icon-maskable-512.png con margini per il ritaglio rotondo
+│   └── favicon-32.png, favicon-64.png  Icona nella scheda del browser
 ├── supabase/
 │   ├── migrations/                 Schema del database, da eseguire in ordine
 │   │   ├── 20261125000001_schema_iniziale.sql
@@ -76,7 +80,7 @@ Per aggiungere un tasto: `data-act="mio-tasto"` nell'HTML e `ACT['mio-tasto']=a=
 
 ## Pubblicare un aggiornamento
 
-- **App**: trascinare `web/index.html` nella pagina Deploys del sito su Netlify.
+- **App**: trascinare l'intera cartella `web/` (index.html, manifest e icone) nella pagina Deploys del sito su Netlify. Se si carica solo `index.html`, le icone della schermata Home non si vedono.
 - **Funzioni**: `supabase functions deploy admin-utenti` e `supabase functions deploy leggi-fattura` (Supabase CLI, collegata al progetto).
 - **Database**: le migrazioni in `supabase/migrations` si applicano in ordine (`supabase db push`).
 
