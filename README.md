@@ -26,7 +26,8 @@ Realizzata da Proxima Studio.
 │       ├── leggi-fattura/index.ts  Lettura con l'IA di fatture ed etichette da foto
 │       └── pagamenti/index.ts      Abbonamenti Stripe: checkout, portale clienti, webhook, stato
 ├── docs/
-│   └── HACCP-Salus-guida-rapida.pdf   Manuale d'uso breve per gli utenti
+│   ├── HACCP-Salus-guida-rapida.pdf   Manuale d'uso breve per gli utenti
+│   └── HACCP-Salus-scheda-tecnica.pdf Scheda tecnica: architettura, linguaggi, librerie, servizi, sicurezza
 └── README.md
 ```
 
