@@ -948,7 +948,7 @@ function prodRow(p){
   return drow('p-'+p.id,`${p.name} ${p.marca} ${p.lotto} ${p.sci||''} ${p.fatt||''}`,
     `<span class="r-title">${esc(p.name)}</span><span class="r-sub">${esc(p.marca)}</span><span class="meta"><span>Lotto: <b class="mono">${esc(p.lotto)}</b></span><span>Kg: ${String(p.kg).replace('.',',')} · Qu: ${qTxt(p.qty)}${Number.isInteger(+p.qty)?'':` (${kgTxt(p.qty*p.kg)})`}</span></span>`,
     expTag(p),
-    `${kv('Scadenza',`${fmt(p.scad)} (${daysTo(p.scad)<0?'scaduto':dueTxt(daysTo(p.scad))})`)}${p.lotAuto?kv('Lotto',`${esc(p.lotto)} <span class="muted">(data di ricevimento, lotto assente)</span>`):''}${kv('Fornitore',esc(fname(p.forn)))}${p.fatt?kv('Fattura',`N° <span class="mono">${esc(p.fatt)}</span>`):''}${kv('Soglia minima',`${p.min} confezioni`)}${p.sci?kv('Nome scientifico',`<i>${esc(p.sci)}</i>`):''}${p.zona?kv('Zona di pesca',esc(p.zona)):''}
+    `${kv('Scadenza',p.scad?`${fmt(p.scad)} (${daysTo(p.scad)<0?'scaduto':dueTxt(daysTo(p.scad))})`:'Non indicata')}${p.lotAuto?kv('Lotto',`${esc(p.lotto)} <span class="muted">(data di ricevimento, lotto assente)</span>`):''}${kv('Fornitore',esc(fname(p.forn)))}${p.fatt?kv('Fattura',`N° <span class="mono">${esc(p.fatt)}</span>`):''}${kv('Soglia minima',`${p.min} confezioni`)}${p.sci?kv('Nome scientifico',`<i>${esc(p.sci)}</i>`):''}${p.zona?kv('Zona di pesca',esc(p.zona)):''}
      <div class="stack" style="gap:6px"><span class="lbl">Allergeni</span>${chipsOf(p.allerg)}</div>
      <div class="actions"><button class="btn sm" data-act="prod-use" data-id="${p.id}">Usa 1 confezione</button><button class="btn sm ghost" data-act="prod-relot" data-id="${p.id}">${ic('refresh',16)} Nuovo lotto</button><button class="btn sm ghost" data-act="trace" data-q="${esc(p.lotto)}">${ic('search',16)} Dove è andato</button><button class="btn sm dng" data-act="prod-nc" data-id="${p.id}">${ic('alert',16)} Non conforme</button><button class="btn sm ghost" data-act="ask-del" data-kind="products" data-id="${p.id}" data-label="${esc(p.name)}">${ic('trash',16)} Elimina</button></div>`);
 }
@@ -1983,7 +1983,7 @@ function irow(it={}){
   const k=uid();
   return `<div class="item irow"><div class="h-row"><span class="lbl">Prodotto</span><button type="button" class="icbtn" data-act="ir-del" aria-label="Rimuovi questo prodotto">${ic('trash',18)}</button></div>
   ${fld('irn-'+k,'Nome',`<input class="in" id="irn-${k}" data-f="name" value="${esc(it.name||'')}" autocomplete="off">`)}
-  <div class="grid2">${fld('irl-'+k,'Lotto',`<input class="in" id="irl-${k}" data-f="lotto" value="${esc(it.lotto||'')}" autocomplete="off">`)}${fld('irs-'+k,'Scadenza',`<input class="in" type="date" id="irs-${k}" data-f="scad" value="${esc(it.scad||'')}">`)}</div>
+  <div class="grid2">${fld('irl-'+k,'Lotto',`<input class="in" id="irl-${k}" data-f="lotto" value="${esc(it.lotto||'')}" autocomplete="off">`)}${fld('irs-'+k,'Scadenza (facoltativa)',`<input class="in" type="date" id="irs-${k}" data-f="scad" value="${esc(it.scad||'')}">`)}</div>
   <div class="grid2">${fld('irq-'+k,'Confezioni',`<input class="in" inputmode="numeric" id="irq-${k}" data-f="qty" value="${it.qty??''}">`)}${fld('irk-'+k,'Peso confezione (kg)',`<input class="in" inputmode="decimal" id="irk-${k}" data-f="kg" value="${it.kg!=null?String(it.kg).replace('.',','):''}">`)}</div></div>`;
 }
 function invoiceReview(d,source,raw,thumb){
@@ -2574,7 +2574,7 @@ Object.assign(FORMS,{
     if(fsel==='__new'&&!val(f,'fn'))return ferr(f,'Scrivi la ragione sociale del nuovo fornitore.',['fn']);
     const m=missing(f,['num','date']);if(m.length)return ferr(f,'Inserisci numero e data della fattura.',m);
     if(!rows.length)return ferr(f,'Aggiungi almeno un prodotto.');
-    const bad=rows.find(r=>!r.scad);if(bad)return ferr(f,`${bad.name}: inserisci la scadenza. Se manca il lotto, uso la data di ricevimento.`);
+    /* scadenza facoltativa: se manca resta vuota (si può aggiungere dopo dal magazzino); se manca il lotto uso la data di ricevimento */
     let forn=fsel;
     if(fsel==='__new'){const nf={id:uid(),name:val(f,'fn'),piva:val(f,'fp').replace(/\D/g,''),cat:'—',sede:'—',legale:'—',rep:'—',tel:'—',email:'—',pec:'—',files:[],note:'Aggiunto dalla foto di una fattura'};S.fornitori.push(nf);forn=nf.id}
     const items=rows.map(r=>{const k=matchProd(r.name);return {...r,allerg:k?[...k.allerg]:[]}});
