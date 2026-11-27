@@ -109,11 +109,7 @@ Per aggiungere un tasto: `data-act="mio-tasto"` nell'HTML e `ACT['mio-tasto']=a=
 - Senza connessione le modifiche restano sul dispositivo e partono appena la rete torna.
 - Le ultime 30 versioni dei dati di ogni azienda restano nello storico sul server.
 
-## Prossimi passi
 
-1. **Notifiche push** (richiedono manifest e service worker).
-2. Lettura dei file **XML della fattura elettronica**.
-3. Divisione di `index.html` in più file (moduli per sezione) prima di nuove funzioni grandi.
 
 ## Prima della produzione
 
