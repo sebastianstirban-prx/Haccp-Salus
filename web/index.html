@@ -458,6 +458,7 @@ input.file{height:auto;padding:10px;font-size:14px}
   - lettura etichette e codici a barre  etichette con IA, EAN e GS1-128 (ZXing), Open Food Facts
   - audit con la checklist OSA ....... 20 domande fisse (Regione Campania), esiti C/NCm/NCM/NA, verbale PDF
   - piano di campionatura ............ voci libere con rapporti di prova (Documentazione, scheda Campionatura)
+  - rintracciabilità di un lotto ...... dal lotto della materia prima a lotti di produzione e clienti (DDT), rapporto PDF
   - events ............................ ascoltatori globali e avvio dell'app
 
   MODELLO DATI (oggetto S, versione v:3)
@@ -934,6 +935,7 @@ function vTrac(){
       <button class="btn" data-go="crea-lotto">Crea lotto</button>
       <button class="btn" data-go="lotti">Lotti</button>
       <button class="btn span2" data-go="uscita">DDT</button>
+      <button class="btn sec span2" data-act="trace">${ic('search',18)} Rintraccia un lotto (richiamo)</button>
       <button class="btn sec span2" data-go="non-conforme">Merce non conforme (${S.nonconf.length})</button>
     </div>
   </div>`;
@@ -944,7 +946,7 @@ function prodRow(p){
     expTag(p),
     `${kv('Scadenza',`${fmt(p.scad)} (${daysTo(p.scad)<0?'scaduto':dueTxt(daysTo(p.scad))})`)}${p.lotAuto?kv('Lotto',`${esc(p.lotto)} <span class="muted">(data di ricevimento, lotto assente)</span>`):''}${kv('Fornitore',esc(fname(p.forn)))}${p.fatt?kv('Fattura',`N° <span class="mono">${esc(p.fatt)}</span>`):''}${kv('Soglia minima',`${p.min} confezioni`)}${p.sci?kv('Nome scientifico',`<i>${esc(p.sci)}</i>`):''}${p.zona?kv('Zona di pesca',esc(p.zona)):''}
      <div class="stack" style="gap:6px"><span class="lbl">Allergeni</span>${chipsOf(p.allerg)}</div>
-     <div class="actions"><button class="btn sm" data-act="prod-use" data-id="${p.id}">Usa 1 confezione</button><button class="btn sm ghost" data-act="prod-relot" data-id="${p.id}">${ic('refresh',16)} Nuovo lotto</button><button class="btn sm dng" data-act="prod-nc" data-id="${p.id}">${ic('alert',16)} Non conforme</button><button class="btn sm ghost" data-act="ask-del" data-kind="products" data-id="${p.id}" data-label="${esc(p.name)}">${ic('trash',16)} Elimina</button></div>`);
+     <div class="actions"><button class="btn sm" data-act="prod-use" data-id="${p.id}">Usa 1 confezione</button><button class="btn sm ghost" data-act="prod-relot" data-id="${p.id}">${ic('refresh',16)} Nuovo lotto</button><button class="btn sm ghost" data-act="trace" data-q="${esc(p.lotto)}">${ic('search',16)} Dove è andato</button><button class="btn sm dng" data-act="prod-nc" data-id="${p.id}">${ic('alert',16)} Non conforme</button><button class="btn sm ghost" data-act="ask-del" data-kind="products" data-id="${p.id}" data-label="${esc(p.name)}">${ic('trash',16)} Elimina</button></div>`);
 }
 function vMag(){
   const ps=[...S.products].sort((a,b)=>a.name.localeCompare(b.name,'it'));
@@ -1060,7 +1062,7 @@ function vUscita(){
   const all=[...S.uscite].sort((a,b)=>b.date.localeCompare(a.date)||String(b.ddt).localeCompare(String(a.ddt),'it',{numeric:true}));
   const cur=all.filter(u=>ym(u.date)===k).map(ddtRow).join('');
   const oth=all.filter(u=>ym(u.date)!==k).map(u=>omRow(ddtRow(u))).join('');
-  return `${tools('Cerca cliente, DDT, lotto o materia prima…','us-list',tb('usc-add','plus','Nuovo DDT','','pri'))}${mbar('uscita')}${allmWrap('us-list',cur,oth,`Nessun DDT in ${ymLabel(k)}. La ricerca trova i DDT di tutti i mesi.`)}`;
+  return `<div class="pad" style="padding-bottom:0"><button class="btn sec block" data-act="trace">${ic('search',18)} Rintraccia un lotto di materia prima</button></div>${tools('Cerca cliente, DDT, lotto o materia prima…','us-list',tb('usc-add','plus','Nuovo DDT','','pri'))}${mbar('uscita')}${allmWrap('us-list',cur,oth,`Nessun DDT in ${ymLabel(k)}. La ricerca trova i DDT di tutti i mesi.`)}`;
 }
 function ddtData(u){
   const c=S.clienti.find(x=>x.id===u.cliente)||{name:'—',addr:''};
@@ -3486,6 +3488,110 @@ Object.assign(ACT,{
   'camp-edit':a=>campForm(a.dataset.id),
   'camp-open':a=>campSheet(a.dataset.id),
   'camp-quick':a=>{const i=$('#cp-v');if(i){i.value=a.dataset.name;i.focus()}}
+});
+
+/* ---------- rintracciabilità di un lotto di materia prima (richiamo) ----------
+   Dal lotto del fornitore (es. il lotto della farina scritto in fattura) si risale a:
+   1. da dove è arrivato: fattura, fornitore, data, quantità, scadenza (S.fatture, S.products);
+   2. in quali lotti di produzione è stato usato (S.lotti[].items[].lotto);
+   3. a quali clienti sono stati consegnati quei lotti, con quale DDT (S.uscite).
+   Si può cercare anche il codice di un lotto di produzione. Il risultato si scarica in PDF,
+   pronto per un ritiro/richiamo (Reg. CE 178/2002 artt. 18-19). */
+const lotKey=s=>String(s||'').toUpperCase().replace(/[\s.\-\/]/g,'');
+function traceLots(){
+  const set=new Map();const add=(v,t)=>{const k=lotKey(v);if(k&&!set.has(k))set.set(k,{v:String(v).trim(),t})};
+  S.fatture.forEach(f=>(f.items||[]).forEach(i=>add(i.lotto,i.name)));
+  S.products.forEach(p=>add(p.lotto,p.name));
+  S.lotti.forEach(l=>(l.items||[]).forEach(i=>add(i.lotto,i.name)));
+  S.lotti.forEach(l=>add(l.code,l.name+' (lotto di produzione)'));
+  return [...set.values()];
+}
+function traceRun(q){
+  const k=lotKey(q);if(!k)return null;
+  const hit=v=>lotKey(v)===k;
+  const orig=[];
+  S.fatture.forEach(f=>(f.items||[]).forEach(i=>{if(hit(i.lotto))orig.push({name:i.name,forn:fname(f.forn),fatt:f.num,date:f.date,qty:i.qty,kg:i.kg,scad:i.scad})}));
+  S.products.forEach(p=>{if(hit(p.lotto)&&!orig.some(o=>o.name===p.name))orig.push({name:p.name,forn:fname(p.forn)||p.marca||'',fatt:p.fatt||'',date:'',qty:p.qty,kg:p.kg,scad:p.scad,mag:true})});
+  const direct=S.lotti.filter(l=>hit(l.code));
+  const used=S.lotti.filter(l=>(l.items||[]).some(i=>hit(i.lotto)));
+  if(!orig.length)used.forEach(l=>(l.items||[]).filter(i=>hit(i.lotto)).forEach(i=>{if(!orig.some(o=>o.name===i.name))orig.push({name:i.name,forn:i.marca||'',fatt:'',date:'',qty:'',kg:'',scad:''})}));
+  const lots=[...new Map([...used,...direct].map(l=>[l.id,l])).values()].sort((a,b)=>a.date.localeCompare(b.date));
+  const ids=new Set(lots.map(l=>l.id));
+  const ddt=[];
+  S.uscite.forEach(u=>u.righe.forEach(r=>{if(ids.has(r.lot)){const c=clOf(u.cliente),l=lotOf(r.lot);ddt.push({cliente:c.name,tipo:c.tipo||'',addr:c.addr||'',ddt:u.ddt,date:u.date,lot:l.code,prod:l.name,qty:r.qty})}}));
+  ddt.sort((a,b)=>a.cliente.localeCompare(b.cliente,'it')||a.date.localeCompare(b.date));
+  const clienti=[...new Map(ddt.map(d=>[d.cliente+'|'+d.addr,{name:d.cliente,tipo:d.tipo,addr:d.addr,righe:ddt.filter(x=>x.cliente===d.cliente&&x.addr===d.addr)}])).values()];
+  const shipped=new Set(ddt.map(d=>d.lot));
+  const canon=traceLots().find(x=>lotKey(x.v)===k);
+  return {q:canon?canon.v:String(q).trim(),orig,lots,direct:direct.length>0,ddt,clienti,fermi:lots.filter(l=>!shipped.has(l.code))};
+}
+const ddtN=s=>/^ddt/i.test(String(s||''))?String(s):'DDT '+s;
+const qtyTxt=o=>[o.qty!==''&&o.qty!=null?`${o.qty} conf.`:'',o.kg?`${String(o.kg).replace('.',',')} kg`:''].filter(Boolean).join(' × ');
+function traceSheet(q){
+  const sugg=traceLots();
+  const r=q?traceRun(q):null;
+  let res='';
+  if(r){
+    const none=!r.orig.length&&!r.lots.length;
+    res=none?`<div class="card"><p>Nessun risultato per il lotto <b class="mono">${esc(r.q)}</b>. Controlla come è scritto in fattura o scegli un lotto dall'elenco.</p></div>`:`
+    <div class="card stack" style="gap:6px"><span class="lbl">In breve</span><p>Il lotto <b class="mono">${esc(r.q)}</b> ${r.direct?'':`è stato usato in <b>${r.lots.length} lott${r.lots.length===1?'o':'i'} di produzione</b>`}${r.direct?`è un lotto di produzione`:''}${r.clienti.length?`, consegnat${r.lots.length===1?'o':'i'} a <b>${r.clienti.length} client${r.clienti.length===1?'e':'i'}</b> con ${r.ddt.length} DDT`:', non ancora consegnato a nessun cliente'}.</p></div>
+    ${r.orig.length?`<div class="stack" style="gap:8px"><span class="lbl">1. Materia prima</span>${r.orig.map(o=>`<div class="card stack" style="gap:3px"><strong>${esc(o.name)}</strong><span class="r-sub">${esc(o.forn||'Fornitore non indicato')}${o.fatt?` · fattura N° <span class="mono">${esc(o.fatt)}</span>`:''}${o.date?` del ${fmt(o.date)}`:''}</span><span class="r-sub">${esc(qtyTxt(o)||'')}${o.scad?` · scadenza ${fmt(o.scad)}`:''}${o.mag?' · in magazzino':''}</span></div>`).join('')}</div>`:''}
+    <div class="stack" style="gap:8px"><span class="lbl">2. Lotti di produzione (${r.lots.length})</span>${r.lots.length?r.lots.map(l=>`<div class="card stack" style="gap:3px"><strong>${esc(l.name)}</strong><span class="r-sub">Lotto <span class="mono">${esc(l.code)}</span> · prodotto il ${fmt(l.date)}${l.scad?` · scad. ${fmt(l.scad)}`:''}</span></div>`).join(''):'<p class="hint">Non è stato usato in nessun lotto di produzione.</p>'}</div>
+    <div class="stack" style="gap:8px"><span class="lbl">3. Clienti a cui è arrivato (${r.clienti.length})</span>${r.clienti.length?r.clienti.map(c=>`<div class="card stack" style="gap:4px"><strong>${esc(c.name)}</strong><span class="r-sub">${esc([c.tipo,c.addr].filter(Boolean).join(' · ')||'Indirizzo non indicato')}</span>${c.righe.map(d=>`<span class="r-sub"><span class="mono">${esc(ddtN(d.ddt))}</span> del ${fmt(d.date)} · ${esc(d.prod)} lotto <span class="mono">${esc(d.lot)}</span> · q.tà ${esc(d.qty)}</span>`).join('')}</div>`).join(''):'<p class="hint">Nessun DDT con questi lotti.</p>'}</div>
+    ${r.fermi.length&&r.clienti.length?`<div class="stack" style="gap:6px"><span class="lbl">Lotti non ancora consegnati</span><p class="r-sub">${r.fermi.map(l=>`${esc(l.name)} <span class="mono">${esc(l.code)}</span>`).join(' · ')}</p></div>`:''}
+    <button class="btn block" type="button" data-act="trace-pdf">${ic('file',18)} Scarica il rapporto PDF</button>`;
+  }
+  openSheet('Rintraccia un lotto',`<div class="stack">
+    <p class="muted">Scrivi il lotto della materia prima, come è scritto in fattura o sull'etichetta del fornitore. Vedi in quali lotti di produzione è stato usato e a quali clienti è arrivato.</p>
+    <form data-form="trace" class="stack" novalidate><div class="row-in" style="display:flex;gap:8px"><input class="in" id="tr-q" name="q" list="tr-list" value="${esc(q||'')}" placeholder="es. L2610-087" autocomplete="off" aria-label="Lotto da rintracciare" style="flex:1;min-width:0"><button class="btn" type="submit">Cerca</button></div>
+    <datalist id="tr-list">${sugg.map(s=>`<option value="${esc(s.v)}">${esc(s.t)}</option>`).join('')}</datalist>${errP}</form>
+    ${res}</div>`);
+  ui.traceQ=q||'';ui.sheetRefresh=()=>traceSheet(ui.traceQ);
+}
+FORMS.trace=f=>{const q=val(f,'q');if(!q)return ferr(f,'Scrivi il lotto da rintracciare.',['q']);traceSheet(q)};
+async function tracePDF(r){
+  const JP=await jsPDFLib();const doc=new JP({unit:'mm',format:'a4'});
+  const A=S.azienda,W=210,H=297,M=14,TW=W-2*M;const ink=()=>doc.setTextColor(23,32,26),grey=()=>doc.setTextColor(91,104,95);
+  let y=0;
+  const head=cont=>{doc.setTextColor(46,125,50);doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.text(pt((A.nome||'').toUpperCase()),M,15);
+    ink();doc.setFontSize(16);doc.text(pt(`Rintracciabilità del lotto ${r.q}${cont?' (continua)':''}`),M,23);
+    doc.setFont('helvetica','normal');doc.setFontSize(8.5);grey();doc.text(pt(`Generato il ${fmt(TISO)} alle ${nowHM()}${me()?' da '+me().name:''} · ${A.addr||''}${A.piva?' · P.IVA '+A.piva:''}`),M,28.5);y=36};
+  const need=h=>{if(y+h>H-16){doc.addPage();head(true)}};
+  const band=t=>{need(16);doc.setFillColor(214,232,215);doc.rect(M,y,TW,7.5,'F');ink();doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.text(pt(t),M+2,y+5.1);y+=10};
+  const table=(cols,rows)=>{
+    const tot=cols.reduce((s,c)=>s+c.w,0),f=TW/tot;
+    const hdr=()=>{doc.setFont('helvetica','bold');doc.setFontSize(7.8);grey();let x=M;cols.forEach(c=>{doc.text(pt(c.t),x+1,y+3.5);x+=c.w*f});y+=5;doc.setDrawColor(150,160,153);doc.line(M,y,W-M,y);y+=1};
+    need(14);hdr();
+    rows.forEach(row=>{doc.setFont('helvetica','normal');doc.setFontSize(8.6);
+      const ls=row.map((v,i)=>doc.splitTextToSize(pt(String(v??'')),cols[i].w*f-2));const h=Math.max(...ls.map(l=>l.length))*3.8+2.4;
+      if(y+h>H-16){doc.addPage();head(true);hdr()}
+      let x=M;ink();ls.forEach((l,i)=>{if(i===0)doc.setFont('helvetica','bold');else doc.setFont('helvetica','normal');doc.text(l,x+1,y+3.8);x+=cols[i].w*f});
+      y+=h;doc.setDrawColor(211,219,213);doc.line(M,y,W-M,y)});
+    y+=4};
+  head(false);
+  doc.setFont('helvetica','normal');doc.setFontSize(10);ink();
+  const sum=r.direct?`Lotto di produzione${r.clienti.length?` consegnato a ${r.clienti.length} client${r.clienti.length===1?'e':'i'} con ${r.ddt.length} DDT`:', non ancora consegnato'}.`
+    :`Usato in ${r.lots.length} lott${r.lots.length===1?'o':'i'} di produzione${r.clienti.length?`, consegnat${r.lots.length===1?'o':'i'} a ${r.clienti.length} client${r.clienti.length===1?'e':'i'} con ${r.ddt.length} DDT`:', non ancora consegnati a nessun cliente'}.`;
+  const sl=doc.splitTextToSize(pt(sum),TW);doc.text(sl,M,y);y+=sl.length*4.6+4;
+  if(r.orig.length){band('1. MATERIA PRIMA E PROVENIENZA');table([{t:'Prodotto',w:30},{t:'Fornitore',w:28},{t:'Fattura',w:22},{t:'Ricevuto',w:16},{t:'Quantità',w:20},{t:'Scadenza',w:16}],
+    r.orig.map(o=>[o.name,o.forn||'-',o.fatt||'-',o.date?fmt(o.date):'-',qtyTxt(o)||'-',o.scad?fmt(o.scad):'-']))}
+  band(`2. LOTTI DI PRODUZIONE (${r.lots.length})`);
+  if(r.lots.length)table([{t:'Prodotto',w:36},{t:'Lotto',w:26},{t:'Prodotto il',w:18},{t:'Scadenza',w:18},{t:'Quantità',w:18},{t:'Consegnato',w:14}],
+    r.lots.map(l=>[l.name,l.code,fmt(l.date),l.scad?fmt(l.scad):'-',l.qty||'-',r.ddt.some(d=>d.lot===l.code)?'Sì':'No']));
+  else{grey();doc.setFontSize(9);doc.text('Nessun lotto di produzione.',M,y+2);y+=8}
+  band(`3. CLIENTI DESTINATARI (${r.clienti.length})`);
+  if(r.ddt.length)table([{t:'Cliente',w:30},{t:'Indirizzo',w:32},{t:'DDT',w:16},{t:'Data',w:15},{t:'Prodotto e lotto',w:36},{t:'Q.tà',w:11}],
+    r.ddt.map(d=>[d.cliente+(d.tipo?` (${d.tipo})`:''),d.addr||'-',d.ddt,fmt(d.date),`${d.prod} - ${d.lot}`,d.qty]));
+  else{grey();doc.setFontSize(9);doc.text('Nessuna consegna registrata con questi lotti.',M,y+2);y+=8}
+  need(26);y+=2;doc.setFont('helvetica','normal');doc.setFontSize(8);grey();
+  const nl=doc.splitTextToSize(pt("Rapporto di rintracciabilità generato dai registri dell'app (fatture di acquisto, lotti di produzione, DDT). In caso di ritiro o richiamo (Reg. CE 178/2002 artt. 18-19) contattare i clienti elencati e informare l'ASL competente."),TW);doc.text(nl,M,y);y+=nl.length*3.6+10;
+  doc.setDrawColor(23,32,26);doc.line(M,y+8,M+75,y+8);doc.text('Firma del responsabile HACCP',M,y+12);
+  const N=doc.getNumberOfPages();for(let i=1;i<=N;i++){doc.setPage(i);doc.setFontSize(7.5);grey();doc.text(pt(`${A.nome||''} - rintracciabilità lotto ${r.q}`),M,H-7);doc.text(`Pagina ${i} di ${N}`,W-M,H-7,{align:'right'})}
+  return doc.output('blob');
+}
+Object.assign(ACT,{
+  trace:a=>traceSheet(a.dataset.q||''),
+  'trace-pdf':()=>{const r=traceRun(ui.traceQ);if(r)makeFile('pdf',()=>tracePDF(r),`rintracciabilita-${slug(r.q)}.pdf`)}
 });
 
 /* ---------- events ---------- */

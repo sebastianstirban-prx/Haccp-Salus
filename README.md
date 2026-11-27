@@ -1,6 +1,6 @@
 # HACCP Salus · LabService srls
 
-Web-app per l'autocontrollo HACCP: temperature, sanificazioni, controllo merci con lettura delle fatture da foto, magazzino, lotti e tracciabilità, documentazione, audit con la checklist OSA della Regione Campania.
+Web-app per l'autocontrollo HACCP: temperature, sanificazioni, controllo merci con lettura delle fatture da foto, magazzino, lotti e tracciabilità (dal lotto della materia prima ai clienti, con rapporto PDF per il richiamo), documentazione e piano di campionatura, audit con la checklist OSA della Regione Campania.
 Ogni azienda cliente ha i suoi dati, separati dalle altre; gli utenti li crea LabService dall'app.
 
 Realizzata da Proxima Studio.
